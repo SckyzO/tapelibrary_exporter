@@ -61,6 +61,14 @@ In **multi-target builds** (`--target-model multi`), the `example` collector is 
 
 In **multi-instance builds** (`--target-model multi-instance`), the `example` collector is the background-refresh variant: `--collector.example.timeout` and `--collector.example.interval` (background refresh period, default `5m`) apply the same way to every watched instance, but there is no `--collector.example.target`, since each instance's address comes from `instances:` in the configuration file (see below), not a flag. `--[no-]collector.example` still toggles it on or off, same as single-target.
 
+This build's own collectors follow that same multi-instance pattern:
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--collector.library.timeout` | Per-request timeout for the `library` collector | `5s` |
+| `--collector.library.interval` | Background refresh interval for the `library` collector | `5m` |
+| `--[no-]collector.library` | Enable or disable the `library` collector | enabled |
+
 There is no single global command/request timeout: each collector owns its own, following
 the `example` collector's pattern above. Run `--help` after adding your own collectors to see
 the full, current flag list.
@@ -70,6 +78,7 @@ the full, current flag list.
 | Collector | Default | Description |
 |-----------|---------|-------------|
 | `example` | enabled | Starter collector: replace with your real data source (see `CONTRIBUTING.md`) |
+| `library` | enabled | Library status, capacity and cartridge counters, and identity, from `GET /v1/library` |
 | `http_client_requests` *(HTTP flavor)* | enabled | Self-instrumentation: HTTP request duration by outcome |
 | `command_exec` *(CLI flavor)* | enabled | Self-instrumentation: command execution duration by outcome |
 

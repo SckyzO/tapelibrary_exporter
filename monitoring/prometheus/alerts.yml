@@ -143,6 +143,63 @@ groups:
             whatever is wrong. Check the exporter's log for the refusal.
 
       # ──────────────────────────────────────────────────────────────────
+      # Business: LibraryCollector (added via /add-collector)
+      # ──────────────────────────────────────────────────────────────────
+      #
+      # tapelibrary_library_state is a stateset: one series per documented
+      # status, exactly one at 1. The severity classification therefore lives
+      # here, in the state selectors, rather than in the metric value the way
+      # the legacy RoS scripts encoded it. Change a state's severity by moving
+      # it between the two rules below; no exporter rebuild is involved.
+      #
+      # The selectors carry the legacy scripts' own classification, with one
+      # deliberate omission: those scripts treated "restarting" as critical,
+      # but R1.11.2 does not list it as a library status at all (it is a drive
+      # and node-card status). Matching on it here would be a rule that can
+      # never fire. See docs/exporter-journal.md, "Open questions".
+      #
+      # Statuses in neither rule (unknown, notConfigured, initializing,
+      # calibrationRequired, cartridgeDegraded) are unclassified rather than
+      # known-benign: the legacy scripts never mapped them. Confirm the
+      # intended severity for each before this file is treated as complete.
+      - alert: LibraryDegraded
+        expr: tapelibrary_library_state{state=~"doorOpen|pausing|paused|inServiceMode|accessorDegraded|nodeCardDegraded|driveDegraded|updating|scanningInventory"} == 1
+        for: 30m
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter library {{ $labels.library }} degraded ({{ $labels.state }})'
+          description: 'Library {{ $labels.library }} has reported status {{ $labels.state }} for 30 minutes. The library is still serving requests but is not fully healthy.'
+
+      - alert: LibraryDegraded
+        expr: tapelibrary_library_state{state=~"doorOpenWhileNotAllowed|accessorsUnavailable"} == 1
+        for: 30m
+        labels:
+          severity: critical
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter library {{ $labels.library }} critically degraded ({{ $labels.state }})'
+          description: 'Library {{ $labels.library }} has reported status {{ $labels.state }} for 30 minutes. Mounts are blocked or about to be: this needs an operator now.'
+
+      # Capacity against the library's OWN configured threshold, not a number
+      # hardcoded here: capacityUtilThresh is an operator setting exposed as
+      # tapelibrary_library_capacity_util_threshold_ratio, so a site that
+      # deliberately runs at 99% is not alerted at 90%. All three series carry
+      # the same label set, so the comparison matches one-to-one per library.
+      - alert: LibraryCapacityThresholdExceeded
+        expr: >
+          tapelibrary_library_cartridges_present / tapelibrary_library_slots_licensed
+            > tapelibrary_library_capacity_util_threshold_ratio
+        for: 30m
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter library {{ $labels.library }} above its capacity threshold'
+          description: 'Library {{ $labels.library }} is {{ printf "%.1f" $value }} full against its own configured capacity utilization threshold, for 30 minutes. Imports will start failing once no licensed slot is free.'
+
+      # ──────────────────────────────────────────────────────────────────
       # EXAMPLE: business alert (commented out: not loaded by Prometheus)
       # ──────────────────────────────────────────────────────────────────
       # A business alert fires on what your collectors actually measure, so

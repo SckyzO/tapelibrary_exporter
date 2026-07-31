@@ -43,6 +43,32 @@ serves the last cached result. Replace this section's rows when you adapt
 | `tapelibrary_healthy` | Gauge | - | Whether the example target reports itself healthy (1) or not (0). |
 | `tapelibrary_example_last_refresh_timestamp_seconds` | Gauge | - | Unix time of the last successful example refresh. Alert if time() minus this exceeds 2x the collector's configured interval. |
 
+## LibraryCollector
+
+Defined in `internal/collector/library.go`, the background-refresh variant: a
+goroutine polls `GET /v1/library` on `--collector.library.interval` and every
+scrape serves the last cached result.
+
+`tapelibrary_library_state` is a **stateset**: every status the TS4500 R1.11.2
+manual documents is emitted as its own series, exactly one carrying `1` and the
+rest `0`. A status the manual does not document is emitted too, as an extra
+series, because the manual's tables are demonstrably a floor rather than a
+ceiling. Severity classification lives in
+[monitoring/prometheus/alerts.yml](../monitoring/prometheus/alerts.yml), never
+in the metric value.
+
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `tapelibrary_library_state` | Gauge | `state` | Operational status of the library, as a stateset: 1 on the active status and 0 on every other known status. |
+| `tapelibrary_library_slots_capacity` | Gauge | - | Total number of cartridge slots the library physically holds. |
+| `tapelibrary_library_slots_licensed` | Gauge | - | Number of cartridge slots the library is currently licensed to use. |
+| `tapelibrary_library_cartridges_present` | Gauge | - | Number of cartridges currently present in the library. |
+| `tapelibrary_library_cartridges_assigned` | Gauge | - | Number of cartridges currently assigned to a logical library. |
+| `tapelibrary_library_capacity_util_threshold_ratio` | Gauge | - | Capacity utilization threshold configured on the library, as a ratio from 0 to 1 (the API reports a 0-100 percentage). |
+| `tapelibrary_library_dual_accessor_util_threshold_ratio` | Gauge | - | Dual-accessor utilization threshold configured on the library, as a ratio from 0 to 1 (the API reports a 0-100 percentage). |
+| `tapelibrary_library_info` | Gauge | `name`, `serial`, `firmware` | Library identity, always 1. Identity strings live here rather than on a measurement series, so a firmware upgrade changes this series alone instead of breaking the continuity of every other. |
+| `tapelibrary_library_last_refresh_timestamp_seconds` | Gauge | - | Unix time of the last successful library refresh. Alert if time() minus this exceeds 2x the collector's configured interval. |
+
 ## Self-instrumentation
 
 Always registered on this target model, with no `--collector.*` flag gating

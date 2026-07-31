@@ -121,6 +121,11 @@
     `powerSupply_F1PSa`, `ioStation_F2IOu`) — never a re-derived frame/column/row
     triple, so a value in a dashboard can be pasted straight into the GUI.
   - `gripper` takes `1`/`2`; `axis` takes `x`/`y`; `door` takes `front`/`rear`/`side`.
+  - **`_info` label keys** (added 2026-07-31 by the `library` collector, the first to
+    emit an `_info` metric, and binding on every collector after it): `name`, `serial`,
+    `firmware`. The spelling is `serial`, not the API's own `sn` — the field list in
+    the bullet below names the API *fields* that must stay off a measurement series,
+    not the label spellings, and a label key is read by operators.
   - **Identity strings never label a measurement series.** `sn`, `firmware`, `mtm`,
     `wwnn`, `wwpn`, `type`, `vendor` and friends live on a dedicated
     `tapelibrary_<subsystem>_info{...} = 1` metric, joined by `location`. A firmware
@@ -263,7 +268,7 @@ variant** — `multi-instance` admits no other.
 - [x] `example`  background  built 2026-07-31 — the scaffold's own starter collector,
       documented as `## ExampleCollector` in `docs/metrics.md`. Not a TS4500 resource:
       it exists to be adapted into the first real collector, or removed once one lands.
-- [ ] `library`  background  `GET /v1/library`
+- [x] `library`  background  built 2026-07-31 — `GET /v1/library`
 - [ ] `frames`  background  `GET /v1/frames`
 - [ ] `accessors`  background  `GET /v1/accessors`
 - [ ] `drives`  background  `GET /v1/drives`
@@ -303,7 +308,11 @@ object's `_info` series. A full stateset over 9 749 cartridges × 6 states would
 are stateset encoding; only the second is affordable at inventory scale.
 
 - `library`: labels `library`, `model`, `state`; 17 state series + 6 capacity gauges
-  + 1 `_info`; worst case ~24 series.
+  + 1 `_info`; worst case ~24 series; **observed 25** — the 24 planned, plus the
+  background variant's own `_last_refresh_timestamp_seconds` freshness gauge, which
+  every background collector emits and which the plan did not count. Expect the same
+  +1 on all 18 collectors, so the fleet total rises by 18 × 5 = 90 series over the
+  figure below rather than being wrong in kind.
 - `frames`: labels `library`, `model`, `location`, `state`, `door`; 12 frames ×
   (6 states + 3 doors + 4 counts + 1 `_info`); worst case ~168 series.
 - `accessors`: labels `library`, `model`, `location`, `state`, `access`, `gripper`,
@@ -427,9 +436,36 @@ library, so it exercises perhaps a third of the enumerated states.
   journal here; the original `./exporter-design-brief.md` was removed in the parent
   directory, its content living on in this file. Ticked the scaffold's own `example`
   collector, the background variant this target model requires.
+- 2026-07-31 `/add-collector` library: built the `library` collector (background, the
+  only variant `multi-instance` admits) against `GET /v1/library`. Fixture derived
+  from `samples/test_data/probe-2026-07-28/library.json`, trimmed to the fields the
+  parser reads and re-anonymised (`LIB-A` → `library1`, `SN00000044` → `SN00000001`);
+  the real magnitudes were kept. Nine descriptors, 25 series observed against 24
+  planned — the extra one is the background variant's freshness gauge, which the
+  budget had not counted for any collector. Established two conventions binding on
+  the 17 collectors still to come: the `_info` label keys (`name`, `serial`,
+  `firmware`, recorded under `## Architecture decisions`) and the stateset's
+  emit-an-undocumented-status-anyway branch, which has its own test. Dropped
+  `restarting` from the ported critical selector because R1.11.2 does not list it as
+  a library status; logged that, the five unclassified statuses, and the unused
+  `cartridgeAccess` field under `## Open questions`. `make check` green.
 
 ## Open questions / assumptions
 
+- **`library.cartridgeAccess` is emitted by nothing.** `GET /v1/library` returns it
+  (`normal` in the capture) and it is plainly the `access` ternary the shared
+  vocabulary already reserves a label for, but the `## Cardinality budget` line for
+  `library` does not include it, so the collector was built to the budget and left it
+  out. Adding it is 3 series (a full stateset at this scale) and needs no new label
+  key. Decide whether it is worth them.
+- **Five `library` statuses carry no severity.** The `LibraryDegraded` rules classify
+  11 of the 17 documented statuses, carried over from the legacy scripts. `unknown`,
+  `notConfigured`, `initializing`, `calibrationRequired` and `cartridgeDegraded` are
+  in neither rule because the legacy scripts never mapped them — unclassified, not
+  known-benign. `restarting` was dropped from the critical selector outright: the
+  scripts treat it as a library status and R1.11.2 does not list it as one, so
+  matching on it would be a rule that can never fire (see the four-way contradiction
+  below).
 - **Legacy drive-severity divergence, unresolved.** `samples/legacy/check_library.sh`
   classifies `inServiceMode` as critical (`2`) and `cleaning` as warning (`1`);
   `check_library_30min.sh` classifies the same two as warning (`1`) and normal (`0`).

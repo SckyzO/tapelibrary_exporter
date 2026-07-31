@@ -1,0 +1,15 @@
+[
+  {
+    "name": "library1",
+    "status": "driveDegraded",
+    "cartridgeAccess": "normal",
+    "totalCapacity": 10732,
+    "licensedCapacity": 9844,
+    "totalCartridges": 9749,
+    "assignedCartridges": 9672,
+    "firmware": "1.11.0.2-C00",
+    "sn": "SN00000001",
+    "capacityUtilThresh": 99.0,
+    "dualAccessorUtilThresh": 98
+  }
+]

@@ -195,6 +195,7 @@ only need Docker or Podman, no host Go install required.
 <!-- BEGIN GENERATED COLLECTORS -->
 <!-- Regenerated from docs/metrics.md. Edits inside this block are overwritten. -->
 - [`example`](docs/metrics.md#examplecollector)
+- [`library`](docs/metrics.md#librarycollector)
 <!-- END GENERATED COLLECTORS -->
 
 Every metric this exporter can emit, grouped by collector, is documented in

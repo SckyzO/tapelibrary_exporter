@@ -143,6 +143,21 @@ func main() {
 		},
 	})
 
+	libraryTimeout := kingpin.Flag("collector.library.timeout", "Per-request timeout for the library collector.").Default("5s").Duration()
+	libraryInterval := kingpin.Flag("collector.library.interval", "Background refresh interval for the library collector.").Default("5m").Duration()
+	libraryEnabled := kingpin.Flag("collector.library", "Enable the library collector.").Default("true").Bool()
+	factories = append(factories, instance.Factory{
+		Name:    "library",
+		Enabled: libraryEnabled,
+		New: func(h *instance.Handle) (instance.BackgroundCollector, error) {
+			c, err := h.ClientFor(*libraryTimeout)
+			if err != nil {
+				return nil, err
+			}
+			return collector.NewLibraryCollector(log, c, *libraryInterval), nil
+		},
+	})
+
 	kingpin.Version(version.Print("tapelibrary_exporter"))
 	kingpin.HelpFlag.Short('h')
 
