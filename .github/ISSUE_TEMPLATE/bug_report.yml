@@ -1,0 +1,101 @@
+name: Bug Report
+description: A metric is missing, wrong, or behaves unexpectedly
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. The more details you give
+        upfront, the faster the issue can be diagnosed.
+
+        Most parsing bugs in an exporter come from how `https://<library-address>/web/api/v1`
+        formats its output on a specific version or environment - the **raw
+        response field below is the single most useful piece of
+        information**.
+
+  - type: input
+    id: exporter_version
+    attributes:
+      label: "tapelibrary_exporter version"
+      description: Output of `tapelibrary_exporter --version` (first line is enough).
+      placeholder: "tapelibrary_exporter, version v1.2.3 ..."
+    validations:
+      required: true
+
+  - type: input
+    id: data_source_version
+    attributes:
+      label: "https://<library-address>/web/api/v1 version"
+      description: The version of the system/service this exporter collects from.
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "Rocky Linux 9.3, Ubuntu 22.04, ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What's happening?
+      description: |
+        Describe the symptom. Include exact metric name(s), label values,
+        and unexpected behavior. A snippet of the affected `/metrics` output
+        works great.
+      placeholder: |
+        e.g. `tapelibrary_example_status{...}` returns no data even
+        though the target clearly has data; `count by (status)
+        (tapelibrary_example_status)` is empty.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Commands / actions that surface the bug.
+      placeholder: |
+        1. Run the exporter with `tapelibrary_exporter --log.level=debug`
+        2. `curl -s http://localhost:9170/metrics | grep tapelibrary_example`
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: raw_output
+    attributes:
+      label: "Raw https://<library-address>/web/api/v1 output (please include this!)"
+      description: |
+        Run the underlying command/API call directly against
+        `https://<library-address>/web/api/v1` and paste its raw output here. Look in the
+        exporter's source code (e.g. `internal/collector/*Data()`
+        functions) for the exact call the collector you're investigating
+        makes.
+
+        This is the **single most useful field** - most bugs are diagnosed
+        from this output alone.
+      render: shell
+
+  - type: textarea
+    id: exporter_logs
+    attributes:
+      label: "Exporter logs (`--log.level=debug`)"
+      description: Restart the exporter with `--log.level=debug` and paste any error/warning lines around the time of the scrape.
+      render: shell
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Dashboards in use, custom flags, container environment, anything that might matter.

@@ -1,0 +1,54 @@
+# OpenSSF Scorecard - supply-chain security posture scoring.
+#
+# Runs the OpenSSF Scorecard checks (branch protection, pinned dependencies,
+# token permissions, dangerous workflows, maintained, SAST, ...) and uploads
+# the result to the repository's Security -> Code scanning tab. Also runs
+# weekly and whenever a branch protection rule changes, so the score is
+# tracked over time.
+#
+# Docs: https://github.com/ossf/scorecard-action
+
+name: Scorecard
+
+on:
+  branch_protection_rule:
+  schedule:
+    - cron: '30 7 * * 1' # Mondays 07:30 UTC (offset from the other crons)
+  push:
+    branches: [main, master]
+
+# Top-level token is read-only; the analysis job elevates only what it needs.
+permissions:
+  contents: read
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write # upload SARIF to code scanning
+      id-token: write        # publish results to the OpenSSF API (publish_results)
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run analysis
+        uses: ossf/scorecard-action@55891bbd73f2425e97637d96e306fc9d491d0b21 # v2.4.4
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: SARIF file
+          path: results.sarif
+          retention-days: 5
+
+      - name: Upload to code-scanning
+        uses: github/codeql-action/upload-sarif@c54b30b7df092240050e69945842bc67aee0f0f4 # v4.37.3
+        with:
+          sarif_file: results.sarif

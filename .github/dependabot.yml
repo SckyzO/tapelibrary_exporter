@@ -1,0 +1,91 @@
+# Dependabot - automated dependency updates.
+#
+# Weekly cadence (Monday morning UTC): low enough to avoid PR fatigue, high
+# enough to catch security fixes within a few days.
+#
+# Related groups bundle updates from the same upstream (golang.org/x,
+# prometheus/*) so a maintainer reviews one PR instead of several.
+#
+# A 7-day cooldown delays proposing a brand-new release: a freshly published
+# (and possibly compromised) version has time to be yanked before it gets
+# pulled in here.
+#
+# See `make report-deps` for an ad-hoc check between Dependabot runs.
+
+version: 2
+
+updates:
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "05:00"
+      timezone: "UTC"
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "go"
+    groups:
+      golang-x:
+        patterns:
+          - "golang.org/x/*"
+      prometheus:
+        patterns:
+          - "github.com/prometheus/*"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "05:00"
+      timezone: "UTC"
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(ci)"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "github-actions"
+
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "05:00"
+      timezone: "UTC"
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(docker)"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "docker"
+
+  - package-ecosystem: "docker"
+    directory: "/scripts/docker/tools"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "05:00"
+      timezone: "UTC"
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: "chore(docker)"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "docker"

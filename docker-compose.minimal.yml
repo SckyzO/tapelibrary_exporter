@@ -1,0 +1,37 @@
+# tapelibrary_exporter: example compose file for the minimal image (Dockerfile.minimal).
+#
+# Same hardening as docker-compose.yml (no-new-privileges, all capabilities
+# dropped, read-only root filesystem, tmpfs /tmp). The minimal image adds to
+# that: no shell, no package manager, and it always runs as the distroless
+# nonroot user regardless of anything set here.
+#
+# container_name below has a "-minimal" suffix so this stack never collides
+# with docker-compose.yml's. The two CAN run at the same time. They still
+# default to the SAME host port (9170) though, so to run this
+# ALONGSIDE the standard stack (e.g. `make docker-run` followed by
+# `make docker-run-minimal`), give this one a free port first:
+#
+#   HOST_PORT=<free-port> make docker-run-minimal
+#
+# Environment overrides:
+#
+#   IMAGE       image to run                   default: tapelibrary_exporter:dev-minimal
+#   HOST_PORT   host-side port for /metrics    default: 9170
+
+services:
+  tapelibrary_exporter:
+    image: ${IMAGE:-tapelibrary_exporter:dev-minimal}
+    container_name: tapelibrary_exporter-minimal
+    restart: unless-stopped
+    ports:
+      - "${HOST_PORT:-9170}:9170"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    command:
+      - --web.listen-address=:9170
+      - --log.level=info

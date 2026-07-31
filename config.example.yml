@@ -1,0 +1,169 @@
+# Example configuration file for tapelibrary_exporter.
+#
+# This file has no effect on its own. --config.file defaults to empty, so
+# nothing here is read unless you start the exporter with:
+#
+#   ./tapelibrary_exporter --config.file=/path/to/your-config.yml
+#
+# Copy this file, edit the copy, and point --config.file at it; nothing
+# scans for a config file automatically.
+#
+# --config.file is not --web.config.file. This file (config.file) configures
+# what the exporter does: which flags get which values, and how it
+# authenticates to whatever it queries. --web.config.file is a separate flag,
+# from prometheus/exporter-toolkit, that configures the TLS/Basic Auth the
+# exporter's own HTTP server presents to Prometheus. Mixing the two up means
+# looking in the wrong file when either side misbehaves.
+#
+# The file has two sections, and one rule decides which a setting belongs to:
+# anything a command-line flag can already express goes under "flags:",
+# keyed by the flag's own long name, without the leading "--". Anything a
+# flag cannot express, such as authentication or TLS for the requests an
+# HTTP-flavor exporter makes outward, gets its own section instead
+# (http_client_config: below). No setting is ever expressible in both
+# places, so a value never has two conflicting sources.
+#
+# Precedence, highest wins: command-line flag, then this file, then the
+# process environment, then the flag's own built-in default. In particular,
+# a value set here is overridden by the same flag passed on the command
+# line, and this file itself sits above the environment, not below it.
+#
+# Paths written inside this file, such as password_file below or
+# tls_config's ca_file/cert_file/key_file, resolve relative to this file's
+# own location, not to the exporter's working directory. Prefer a *_file
+# form over an inline value for any secret (password_file over password,
+# for example) so the secret itself never has to live in this file.
+
+flags:
+  # A plain scalar: one value for the flag.
+  log.level: info
+
+  # A bool must be written as a YAML boolean (true/false), not a quoted
+  # string. Watch out for the reverse case, though: this parser reads YAML
+  # 1.1, so an UNQUOTED yes, no, on, or off also resolves to a boolean. If a
+  # flag takes a string value that happens to be one of those words, quote
+  # it (log.level: "on") to keep it a string.
+  web.disable-exporter-metrics: false
+
+  # A repeatable flag becomes a YAML list, one entry per repetition on the
+  # command line. web.listen-address defaults to a single address; listing
+  # two here binds both instead of just the second one. Pick addresses that
+  # do not overlap: on Linux, a wildcard address already covers both IPv4
+  # and IPv6 on the same port, so also listing an explicit ::1 on that same
+  # port fails to bind. The second entry below deliberately sits well outside
+  # the 9100 to 9999 range exporters draw their default port from, so it
+  # cannot collide with the first whatever port this exporter was built with.
+  web.listen-address:
+    - ":9170"
+    - "127.0.0.1:19101"
+
+  # A collector's own flags follow the same rule as any built-in flag.
+  # Commented out because this file ships with both target models and a
+  # multi-target exporter declares no collector.example.* flags: its target
+  # arrives per request on /probe rather than from a flag. Uncomment it on a
+  # single-target exporter, where the flag exists.
+  # collector.example.timeout: 10s
+
+  # Bounds how many outbound requests/commands this exporter has in flight
+  # at once. 0 (the default) means unlimited. Available on single-target and
+  # multi-instance builds only: a multi-target exporter has no such flag, see
+  # docs/configuration.md's "Bounding outbound concurrency" section for what
+  # this actually bounds on each build (per target address on single-target
+  # HTTP, exporter-wide on single-target CLI, per watched instance on
+  # multi-instance).
+  # Set to 1 here on purpose: the TS4500's LCC and robotics path serialize
+  # internally, so a second concurrent request buys nothing and risks
+  # degrading the very machine this exporter observes. The cost is that a
+  # slow collector delays its siblings on the same library, which is visible
+  # in tapelibrary_exporter_request_wait_seconds rather than hidden.
+  exporter.max-requests-per-target: 1
+
+# http_client_config carries the authentication and TLS settings no flag can
+# express. It only applies to an HTTP-flavor exporter's outbound requests. A
+# CLI-flavor exporter runs a local command instead, so it has nothing to
+# authenticate: given this section it refuses to start rather than accept a
+# setting it would silently drop.
+#
+# Commented out here on purpose: an active block pointing at password_file/
+# ca_file/cert_file/key_file paths that do not exist on your machine would
+# fail --config.file loading outright, which is the last thing an example
+# meant to be copied and tried should do. Uncomment it and point the paths
+# at your own files to use it.
+#
+# http_client_config:
+#   basic_auth:
+#     username: monitoring
+#     password_file: /etc/tapelibrary_exporter/basic_auth_password
+#   tls_config:
+#     ca_file: /etc/tapelibrary_exporter/ca.crt
+#     cert_file: /etc/tapelibrary_exporter/client.crt
+#     key_file: /etc/tapelibrary_exporter/client.key
+#     server_name: example.internal
+#     insecure_skip_verify: false
+
+# modules: named credential/TLS bundles this exporter can select. What reads
+# this section, and how a module gets picked, depends on the target model
+# this exporter was scaffolded with:
+#
+# - single-target builds refuse this section outright at boot: it does not
+#   apply there at all.
+# - multi-target builds (/probe) select a module per request with
+#   /probe?target=...&module=...; there, a module may carry both a
+#   collectors: subset and an http_client_config:.
+# - multi-instance builds have each instances: entry reference a module by
+#   name in its own module: key (see docs/configuration.md), resolved once
+#   at boot rather than per request.
+#   There, a module's collectors: key is refused: collector enablement is
+#   global via --[no-]collector.<name> instead, so a per-module subset would
+#   be meaningless.
+#
+# On a multi-target build specifically, credentials never combine: at most
+# one of the modules a request selects may carry an http_client_config:, and
+# naming two is refused with a 400 rather than resolved by a precedence
+# nobody wrote. A module that lists no collectors contributes only its
+# credentials, which is what lets a credentials module be combined with
+# collector modules.
+#
+# On a multi-target build, this section and the top-level http_client_config:
+# above cannot both be set: with modules declared, nothing reads the
+# top-level one. (Multi-instance tolerates both present, but then the
+# top-level section goes unread too, since every instance resolves its module
+# by name; a known asymmetry, not something to rely on.)
+#
+# Commented out for the same reason as http_client_config: above, an active
+# block pointing at files that do not exist on your machine would fail to load.
+#
+# Two conventions work, and the choice is yours to make here rather than in
+# code, so it is reversible without regenerating anything.
+#
+# Convention 1, one module per group of targets, each a complete bundle:
+#
+# modules:
+#   prod:
+#     collectors: [example]
+#     http_client_config:
+#       basic_auth:
+#         username: monitoring
+#         password_file: /etc/tapelibrary_exporter/prod_password
+#   staging:
+#     collectors: [example]
+#     http_client_config:
+#       basic_auth:
+#         username: monitoring
+#         password_file: /etc/tapelibrary_exporter/staging_password
+#
+#   Scraped with: /probe?target=...&module=prod
+#
+# Convention 2, credentials and collector subsets as independent axes:
+#
+# modules:
+#   default:
+#     http_client_config:
+#       basic_auth:
+#         username: monitoring
+#         password_file: /etc/tapelibrary_exporter/password
+#   quick:
+#     collectors: [example]
+#
+#   Scraped with: /probe?target=...&module=quick
+#   (the default module supplies the credentials; naming it is optional)

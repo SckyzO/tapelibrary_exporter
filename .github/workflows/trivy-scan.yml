@@ -1,0 +1,81 @@
+# Trivy vulnerability scan on the two Docker variants.
+#
+# Triggered on PRs that touch a Dockerfile or the Go dependency lockfiles.
+# Builds both images locally (single-arch - a representative scan does not
+# need the full release matrix) and fails the PR on a HIGH/CRITICAL CVE that
+# has a fix available. Unfixable CVEs (no upstream patch yet) are reported in
+# the summary but do not block the merge.
+#
+# Also runs weekly against a freshly built image so a newly disclosed CVE is
+# caught between commits, not only when a Dockerfile/dependency changes.
+#
+# Dockerfile/Dockerfile.minimal build the binary from source in their own
+# build stage (see either file's own header comment) - unlike a COPY-only
+# Dockerfile that expects some external step to stage a pre-built binary
+# first, `docker build .` here needs nothing but the repository itself, so
+# this workflow is just checkout + build + scan, twice.
+
+name: Trivy scan
+
+on:
+  pull_request:
+    paths:
+      - 'Dockerfile'
+      - 'Dockerfile.minimal'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/trivy-scan.yml'
+  schedule:
+    - cron: '0 6 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  scan-standard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build standard image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: tapelibrary_exporter:scan
+      - name: Trivy scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: tapelibrary_exporter:scan
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+          format: table
+
+  scan-minimal:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build minimal image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: Dockerfile.minimal
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: tapelibrary_exporter:scan-minimal
+      - name: Trivy scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: tapelibrary_exporter:scan-minimal
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+          format: table

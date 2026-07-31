@@ -1,0 +1,19 @@
+# Code owners for tapelibrary_exporter.
+#
+# When a pull request touches a matched path, the listed owner is
+# automatically requested for review. This only wires the automatic review
+# request - enforcing it (blocking merge without that review) is a separate,
+# opt-in branch-protection setting ("Require review from Code Owners").
+#
+# Docs: https://docs.github.com/articles/about-code-owners
+
+# Default owner for everything in the repository.
+*                       @sckyzo
+
+# Supply-chain / CI-sensitive paths - called out explicitly so ownership of
+# the release, signing, and CI plumbing stays unambiguous even if more
+# owners are added to the catch-all above later.
+/.github/               @sckyzo
+/Dockerfile*            @sckyzo
+/.goreleaser*           @sckyzo
+/scripts/docker/        @sckyzo

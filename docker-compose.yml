@@ -1,0 +1,38 @@
+# tapelibrary_exporter: example compose file for the standard image (Dockerfile).
+#
+# Hardened by default:
+#   - no-new-privileges: the container can never gain more privileges than
+#     it started with (e.g. via a setuid/setgid binary).
+#   - every Linux capability dropped - this exporter needs none of them.
+#   - the root filesystem is read-only - a stateless HTTP exporter has no
+#     legitimate reason to write anywhere.
+#   - /tmp is a small in-memory tmpfs, for the rare case something still
+#     wants a writable path (e.g. a library that insists on a temp file).
+#
+# Environment overrides:
+#
+#   IMAGE       image to run                   default: tapelibrary_exporter:dev
+#   HOST_PORT   host-side port for /metrics    default: 9170
+
+services:
+  tapelibrary_exporter:
+    image: ${IMAGE:-tapelibrary_exporter:dev}
+    container_name: tapelibrary_exporter
+    restart: unless-stopped
+    ports:
+      - "${HOST_PORT:-9170}:9170"
+    # CLI-flavor note: if this exporter's collectors shell out to an external
+    # CLI tool, mount it (and any config/socket it needs) read-only here,
+    # e.g.:
+    # volumes:
+    #   - /path/on/host/to/tool:/usr/local/bin/tool:ro
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    command:
+      - --web.listen-address=:9170
+      - --log.level=info

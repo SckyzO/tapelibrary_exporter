@@ -1,0 +1,49 @@
+# .goreleaser.dev.yaml: fast, unpublished snapshot build for tapelibrary_exporter.
+#
+# Host-agnostic, always scaffolded, like .goreleaser.yaml. Runs on every push
+# to the default branch (see .github/workflows/dev-release.yml, if the
+# GitHub layer is in use) or manually:
+#
+#   goreleaser release --config .goreleaser.dev.yaml --clean --snapshot
+#
+# Single-platform (linux/amd64), no Docker images, no signing, no SBOM - just
+# a fast binary + archive so a maintainer or CI can confirm HEAD actually
+# builds and packages, without waiting on the full release matrix in
+# .goreleaser.yaml. `--snapshot` never publishes or requires a tag.
+
+version: 2
+
+project_name: tapelibrary_exporter
+
+release:
+  prerelease: auto
+  name_template: "{{.Tag}}-next"
+
+builds:
+  - id: tapelibrary_exporter-dev
+    goos:
+      - linux
+    goarch:
+      - amd64
+    binary: "{{ .ProjectName }}"
+    main: "./cmd/tapelibrary_exporter"
+    ldflags:
+      - "-s -w"
+      - "-X=github.com/prometheus/common/version.Version={{.Version}}"
+      - "-X=github.com/prometheus/common/version.Revision={{.Commit}}"
+      - "-X=github.com/prometheus/common/version.Branch={{.Branch}}"
+      - "-X=github.com/prometheus/common/version.BuildUser={{.Env.BUILD_USER}}"
+      - "-X=github.com/prometheus/common/version.BuildDate={{.Env.BUILD_DATE}}"
+    env:
+      - CGO_ENABLED=0
+
+archives:
+  - id: tapelibrary_exporter-dev-archive
+    name_template: "{{ .ProjectName }}.dev"
+    files:
+      - README.md
+      - LICENSE
+      - CHANGELOG.md
+
+checksum:
+  name_template: "{{ .ProjectName }}_checksums.txt"

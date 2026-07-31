@@ -1,0 +1,67 @@
+---
+# Prometheus recording rules for tapelibrary_exporter.
+#
+# These pre-compute commonly-used expressions so dashboards and alerts can
+# query them without redoing the maths on every render.
+#
+# Load this file in Prometheus with:
+#
+#   rule_files:
+#     - /etc/prometheus/rules/tapelibrary_exporter_rules.yml
+
+groups:
+  - name: tapelibrary.rules
+    rules:
+      # Average scrape duration across collectors that succeeded on their
+      # last scrape: "how slow are the collectors that are actually
+      # working", ignoring failed ones instead of letting a fast-failing
+      # collector's near-zero duration quietly drag the average down.
+      #
+      # tapelibrary_exporter_collector_duration_seconds and
+      # tapelibrary_exporter_collector_success share the same `collector`
+      # label set (both are emitted from the same StatusTracker.Collect
+      # call for the same entry: see
+      # internal/collector/status_tracker.go), so multiplying them
+      # together zeroes out any failed collector's duration before
+      # summing: success is always exactly 0 or 1, never anything else.
+      #
+      # The "(... > 0)" guard is not decorative. If every collector is
+      # failing at once (success == 0 for all of them, e.g. the scraped
+      # target is entirely unreachable), every collector is still PRESENT
+      # and reporting, just at value 0. So both the numerator and the
+      # denominator evaluate to the literal number 0, a real 0/0, not
+      # merely "no data". The guard turns that case into "no data" instead,
+      # which is the right answer: the average duration of the
+      # currently-healthy collectors is meaningless when there are none.
+      - record: job:tapelibrary_exporter_collector_duration_seconds:avg_healthy
+        expr: >
+          sum by (job,library) (tapelibrary_exporter_collector_duration_seconds * tapelibrary_exporter_collector_success)
+          / (sum by (job,library) (tapelibrary_exporter_collector_success) > 0)
+
+      # ──────────────────────────────────────────────────────────────────
+      # EXAMPLE (commented out): business error-rate ratio
+      # ──────────────────────────────────────────────────────────────────
+      # Once you add a collector with a real counter metric (via
+      # /add-collector), the textbook version of this guard applies
+      # directly: an error-rate ratio built from two rate()s of real
+      # counters. This exporter's own self-instrumentation already ships
+      # one such pair: the per-flavor request/command duration histogram,
+      # bucketed by `outcome` (see docs/metrics.md), shown here as the
+      # worked example instead of a fabricated business metric:
+      #
+      #   - record: job:tapelibrary_exporter_request_error_rate:ratio5m   # HTTP flavor
+      #     expr: >
+      #       rate(tapelibrary_exporter_request_duration_seconds_count{outcome="error"}[5m])
+      #       / (rate(tapelibrary_exporter_request_duration_seconds_count[5m]) > 0)
+      #
+      #   - record: job:tapelibrary_exporter_command_error_rate:ratio5m   # CLI flavor
+      #     expr: >
+      #       rate(tapelibrary_exporter_command_duration_seconds_count{outcome="error"}[5m])
+      #       / (rate(tapelibrary_exporter_command_duration_seconds_count[5m]) > 0)
+      #
+      # Here the guard matters for the textbook reason: on a quiet exporter
+      # with zero requests/commands in the last 5m, both rates are exactly
+      # 0: 0/0 without the guard, "no data" with it, instead of a bogus
+      # 100%-error-rate-looking NaN. Only one of the two records above
+      # applies to your flavor; see docs/metrics.md's "Self-instrumentation"
+      # section to confirm which histogram your exporter actually emits.

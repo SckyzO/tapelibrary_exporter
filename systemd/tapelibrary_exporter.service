@@ -1,0 +1,87 @@
+[Unit]
+Description=Prometheus exporter for https://<library-address>/web/api/v1 (tapelibrary_exporter)
+Documentation=https://prometheus.io/docs/instrumenting/exporters/
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+
+# Run as a dedicated, unprivileged user - never root. Create it first, e.g.:
+#   useradd --system --no-create-home --shell /usr/sbin/nologin tapelibrary_exporter
+User=tapelibrary_exporter
+Group=tapelibrary_exporter
+
+# Update this path to wherever the binary actually lives. The default after
+# `make build` is bin/tapelibrary_exporter inside the project checkout, but most
+# operators copy it to /usr/local/bin/ (or extract it there from one of the
+# tagged-release archives - see docs/release-process.md) for a real install.
+ExecStart=/usr/local/bin/tapelibrary_exporter --web.listen-address=":9170"
+
+# --- Example with TLS and/or basic auth ---
+# See the exporter-toolkit web-config docs for the file format:
+# https://github.com/prometheus/exporter-toolkit/blob/master/docs/web-configuration.md
+# ExecStart=/usr/local/bin/tapelibrary_exporter \
+#   --web.listen-address=":9170" \
+#   --web.config.file="/etc/tapelibrary_exporter/web-config.yml"
+
+# --- Example with only specific collectors enabled ---
+# See docs/configuration.md for the full --collector.* flag list.
+# ExecStart=/usr/local/bin/tapelibrary_exporter \
+#   --web.listen-address=":9170" \
+#   --no-collector.<name>
+
+Restart=on-failure
+RestartSec=5
+
+# `systemctl reload tapelibrary_exporter` sends SIGHUP. On a multi-target or
+# multi-instance build (--target-model multi / multi-instance), this exporter
+# handles SIGHUP itself: it re-reads --config.file in place and keeps serving,
+# no restart, no dropped connection (see docs/configuration.md's
+# "Configuration reload" section), so ExecReload below is wired.
+#
+# On a single-target build (the default), this exporter installs no SIGHUP
+# handler at all, so scaffold.sh comments ExecReload out for that target
+# model: without it, `systemctl reload` refuses at the systemd level ("Job
+# type reload is not applicable") instead of ever reaching the process. Were
+# it left active, that same command would deliver SIGHUP's OS default
+# (terminate) to the DEFAULT target model, and Restart=on-failure above would
+# then turn every `systemctl reload` into a five-second outage and a scrape
+# gap instead of the harmless no-op it was before this exporter had any
+# reload mechanism at all. Use `systemctl restart` to pick up an edited
+# --config.file or changed flags on a single-target build.
+ExecReload=/bin/kill -HUP $MAINPID
+
+# --- Hardening --------------------------------------------------------------
+# Safe unconditionally for this binary (it never needs to gain privileges via
+# a setuid/setgid/file-capability helper) - mirrors the
+# `no-new-privileges:true` already set in docker-compose.yml/.minimal.yml, so
+# the binary gets the same guarantee whether it runs as a container or a
+# systemd unit.
+NoNewPrivileges=true
+
+# The directives below are stricter and can need one-off tuning (e.g. if you
+# point --web.config.file, or a CLI-flavor collector's target binary, at a
+# path one of these would otherwise block). Uncomment progressively and
+# re-test after each one - `systemctl status tapelibrary_exporter` and the
+# journal will show a sandboxing failure clearly if one bites:
+#
+# ProtectSystem=strict        # whole OS read-only except ReadWritePaths below
+# ProtectHome=true            # no access to /home, /root, /run/user
+# PrivateTmp=true             # isolated /tmp, matches the compose tmpfs
+# ProtectKernelTunables=true  # no writes to /proc/sys, /sys
+# ProtectKernelModules=true   # cannot load/unload kernel modules
+# ProtectControlGroups=true   # read-only cgroup hierarchy
+# RestrictSUIDSGID=true       # cannot create setuid/setgid files
+# RestrictRealtime=true       # cannot request realtime scheduling
+# LockPersonality=true        # cannot change the process execution domain
+# MemoryDenyWriteExecute=true # blocks W^X violations (JIT-style exploits)
+# RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# CapabilityBoundingSet=      # drop every capability; add back only what a
+#                              # CLI-flavor target binary genuinely needs
+# ReadWritePaths=             # this exporter writes nothing by default (no
+#                              # cache, no local state) - add a path here
+#                              # only if a collector you add needs one
+
+[Install]
+WantedBy=multi-user.target

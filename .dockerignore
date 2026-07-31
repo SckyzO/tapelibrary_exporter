@@ -1,0 +1,34 @@
+# Keep the Docker build context small. Dockerfile/Dockerfile.minimal are
+# multi-stage builds that compile from source, so go.mod, go.sum, cmd/, and
+# internal/ ARE needed in the context - do not add them below. Everything
+# else here plays no part in the build.
+
+# Build artefacts (rebuilt from source inside the image either way)
+bin/
+dist/
+linux/
+
+# Test fixtures - not needed to compile the binary
+**/testdata/
+
+# Docs, monitoring, and packaging assets - irrelevant to the image build
+docs/
+monitoring/
+scripts/
+systemd/
+Dockerfile*
+docker-compose*.yml
+
+# Project metadata that doesn't affect the image
+.git/
+.github/
+.gitignore
+.golangci.yml
+.goreleaser.yaml
+.goreleaser.dev.yaml
+CHANGELOG.md
+CONTRIBUTING.md
+README.md
+SECURITY.md
+LICENSE
+Makefile

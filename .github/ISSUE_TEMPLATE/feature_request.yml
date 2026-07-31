@@ -1,0 +1,62 @@
+name: Feature Request
+description: Propose a new metric, collector, dashboard panel, or behavior
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to suggest something. Feature requests
+        get prioritized on **operational value** ("what can users not
+        monitor today?"), not on completeness ("everything that could be
+        exposed").
+
+        Before opening, check existing issues and discussions - the idea
+        might already be tracked.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: |
+        Describe the operational question, alerting need, or
+        capacity-planning question behind the request. Concrete use cases
+        get prioritized faster.
+      placeholder: |
+        e.g. I want to alert when a queue consistently backs up for too
+        long, or detect when a resource stays saturated while requests
+        queue behind it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed metric / collector / behavior
+      description: |
+        A rough sketch helps: metric name(s) + labels + type
+        (gauge/counter/histogram), or a description of the new behavior.
+      placeholder: |
+        e.g. `tapelibrary_job_count_failed{queue, user}` (gauge) - count
+        of jobs in a failed state, per queue and user.
+    validations:
+      required: true
+
+  - type: textarea
+    id: data_source_call
+    attributes:
+      label: "Underlying call to https://<library-address>/web/api/v1 (if known)"
+      description: |
+        What request/command/query would supply the data? Helps assess
+        feasibility and load on the target.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any workarounds today (PromQL tricks, other exporters, manual scripts)?
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Related links, examples from other exporters, pointers to discussions.

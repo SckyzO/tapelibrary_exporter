@@ -1,0 +1,65 @@
+# golangci-lint v2 configuration for tapelibrary_exporter
+# Docs: https://golangci-lint.run/usage/configuration/
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    # --- Correctness ---
+    - errcheck       # Unchecked errors (silent failures from strconv, io, etc.)
+    - govet          # Reports suspicious constructs (shadow, printf misuse, etc.)
+    - staticcheck    # Comprehensive static analysis (supersedes gosimple, stylecheck, unused)
+    - ineffassign    # Detects assignments whose value is never used
+
+    # --- Security ---
+    - gosec          # Security checks (G103 unsafe, G304 file inclusion, G401 weak crypto, etc.)
+
+    # --- Bugs / robustness ---
+    - bodyclose      # HTTP response body must be closed
+    - noctx          # HTTP requests must use context
+
+    # --- Style / maintainability ---
+    - revive         # Extensible replacement for golint
+    - gocritic       # Opinionated checks (including rangeValCopy, captLocal, etc.)
+    - misspell       # Spelling mistakes in comments and strings
+    - whitespace     # Unnecessary blank lines
+
+  settings:
+    revive:
+      rules:
+        - name: indent-error-flow
+
+    gocritic:
+      enabled-checks:
+        # captLocal, commentFormatting, singleCaseSwitch, appendAssign are already
+        # enabled by default, only list non-default checks here.
+        - rangeValCopy
+
+    staticcheck:
+      checks:
+        - all
+
+  exclusions:
+    rules:
+      # Test files: relax errcheck (io.ReadAll error is acceptable in tests)
+      - path: "_test\\.go"
+        linters:
+          - errcheck
+          - gosec
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/sckyzo/tapelibrary_exporter
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

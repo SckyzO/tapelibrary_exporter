@@ -1,0 +1,78 @@
+# syntax=docker/dockerfile:1.7
+#
+# tapelibrary_exporter: minimal variant.
+#
+# Identical build stage to Dockerfile (same pinned Go toolchain, same static
+# build, same ldflags version injection), but the runtime stage is Google's
+# distroless "static" image: no shell, no package manager, no libc at all -
+# safe here only because CGO_ENABLED=0 makes the binary fully static with
+# zero runtime library dependencies. Runs as the image's own baked-in
+# nonroot user (uid 65532); no USER directive needed, distroless enforces it
+# unconditionally.
+#
+# Trade-off vs. the standard Dockerfile: smaller image and a materially
+# smaller attack surface (no shell to pivot from if the exporter itself is
+# ever compromised), at the cost of no in-container debugging (no exec, no
+# package manager to install a troubleshooting tool on the fly).
+#
+# CLI-flavor note: if this exporter's collectors shell out to an external CLI
+# tool instead of calling an HTTP API (see internal/collector's use of
+# Execute, if this scaffold picked the "cli" flavor), that tool cannot be
+# installed here - distroless has no package manager and no shell to run one
+# with. Either bind-mount the tool (and any shared libraries it needs)
+# read-only from the host, or build your own minimal variant from a base
+# that still has a package manager (Dockerfile's own runtime stage is a
+# reasonable starting point) instead of this one. This file is a fine
+# default as-is for an HTTP-flavor exporter, which needs no external binary.
+
+# ---- build stage -----------------------------------------------------------
+FROM golang:1.26.5-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2 AS build
+
+WORKDIR /src
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY cmd/ cmd/
+COPY internal/ internal/
+
+ARG VERSION=dev
+ARG COMMIT=
+ARG BRANCH=
+ARG BUILD_USER=
+ARG BUILD_DATE=
+
+RUN CGO_ENABLED=0 GOOS=linux go build \
+      -ldflags "-s -w \
+        -X github.com/prometheus/common/version.Version=${VERSION} \
+        -X github.com/prometheus/common/version.Revision=${COMMIT} \
+        -X github.com/prometheus/common/version.Branch=${BRANCH} \
+        -X github.com/prometheus/common/version.BuildUser=${BUILD_USER} \
+        -X github.com/prometheus/common/version.BuildDate=${BUILD_DATE}" \
+      -o /out/tapelibrary_exporter \
+      ./cmd/tapelibrary_exporter
+
+# ---- runtime stage ----------------------------------------------------------
+FROM gcr.io/distroless/static:nonroot@sha256:f7f8f729987ad0fdf6b05eeeae94b26e6a0f613bdf46feea7fc40f7bd72953e6
+
+COPY --from=build /out/tapelibrary_exporter /usr/local/bin/tapelibrary_exporter
+
+EXPOSE 9170
+
+ARG VERSION=dev
+ARG COMMIT=
+ARG BUILD_DATE=
+
+LABEL org.opencontainers.image.title="tapelibrary_exporter (minimal)" \
+      org.opencontainers.image.description="Prometheus exporter that collects metrics from https://<library-address>/web/api/v1 (minimal, distroless variant)" \
+      org.opencontainers.image.licenses="gpl-3.0" \
+      org.opencontainers.image.vendor="sckyzo" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${COMMIT}" \
+      org.opencontainers.image.created="${BUILD_DATE}"
+
+# distroless static:nonroot already runs as uid 65532. No USER directive
+# needed; the image enforces it.
+
+ENTRYPOINT ["/usr/local/bin/tapelibrary_exporter"]
+CMD ["--web.listen-address=:9170"]

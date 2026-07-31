@@ -1,0 +1,52 @@
+# Create a fast, unpublished dev snapshot on every push to the default
+# branch, via .goreleaser.dev.yaml (single-platform, no Docker, no signing -
+# see that file's own header comment for why).
+
+name: Create Dev Release
+
+on:
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        # fetch-depth: 0 already retrieves all tags (the fetch refspec
+        # includes +refs/tags/*), which GoReleaser needs for the changelog.
+        # release.yml relies on this same checkout with no extra tag fetch.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26.5' # keep in sync with go.mod's toolchain directive
+          cache: false
+
+      # Populates the build metadata .goreleaser.dev.yaml consumes
+      # ({{.Env.BUILD_DATE}}, {{.Env.BUILD_USER}}).
+      - name: Set build environment variables
+        run: |
+          echo "BUILD_DATE=$(date +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_ENV"
+          echo "GO_VERSION=$(go version)" >> "$GITHUB_ENV"
+
+      - name: Run GoReleaser for Dev
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          distribution: goreleaser
+          version: '2.16.0' # keep in sync with release.yml
+          args: release --config .goreleaser.dev.yaml --clean --snapshot
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUILD_USER: "${{ github.actor }}"
+          BUILD_DATE: ${{ env.BUILD_DATE }}
+          GO_VERSION: ${{ env.GO_VERSION }}
+          BRANCH_NAME: ${{ github.ref_name }}
+          REVISION: ${{ github.sha }}

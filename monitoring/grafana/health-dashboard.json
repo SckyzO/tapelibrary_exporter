@@ -1,0 +1,596 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "Prometheus",
+      "description": "",
+      "type": "datasource",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus"
+    }
+  ],
+  "__elements": {},
+  "__requires": [
+    {
+      "type": "grafana",
+      "id": "grafana",
+      "name": "Grafana",
+      "version": "10.0.0"
+    },
+    {
+      "type": "datasource",
+      "id": "prometheus",
+      "name": "Prometheus",
+      "version": "1.0.0"
+    },
+    {
+      "type": "panel",
+      "id": "bargauge",
+      "name": "Bar gauge",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "gauge",
+      "name": "Gauge",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "row",
+      "name": "Row",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "stat",
+      "name": "Stat",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "state-timeline",
+      "name": "State timeline",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "status-history",
+      "name": "Status history",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "table",
+      "name": "Table",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "timeseries",
+      "name": "Time series",
+      "version": ""
+    }
+  ],
+  "annotations": {
+    "list": []
+  },
+  "description": "Exporter self-health for tapelibrary_exporter: target up/down, per-collector success/failure, scrape duration, and Go build info. Generic across every flavor this exporter was scaffolded from. Self-instrumentation is identical, only $job and the namespace vary.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [],
+  "panels": [
+    {
+      "type": "row",
+      "id": 100,
+      "title": "Exporter Health",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "type": "stat",
+      "id": 1,
+      "title": "Target Up",
+      "description": "Prometheus's own scrape outcome for this target, independently of anything the exporter itself reports.",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "color": "red", "index": 0, "text": "DOWN" },
+                "1": { "color": "green", "index": 1, "text": "UP" }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "up{job=~\"$job\"}",
+          "legendFormat": "{{instance}}",
+          "refId": "A",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "type": "stat",
+      "id": 2,
+      "title": "Collectors OK",
+      "description": "Number of collectors that succeeded on their last scrape.",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "fixed", "fixedColor": "blue" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "sum by (job, instance) (tapelibrary_exporter_collector_success{job=~\"$job\"})",
+          "legendFormat": "OK {{job}}/{{instance}}",
+          "refId": "A",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "type": "stat",
+      "id": 3,
+      "title": "Collectors FAIL",
+      "description": "Number of collectors that failed their last scrape. Should always be 0, regardless of how many collectors you have.",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "sum by (job, instance) (1 - tapelibrary_exporter_collector_success{job=~\"$job\"})",
+          "legendFormat": "FAIL {{job}}/{{instance}}",
+          "refId": "A",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "type": "gauge",
+      "id": 4,
+      "title": "Collectors Healthy (%)",
+      "description": "Percentage of collectors that succeeded on last scrape.",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
+      "options": {
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "unit": "percent",
+          "decimals": 0,
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 80 },
+              { "color": "green", "value": 100 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "sum by (job, instance) (tapelibrary_exporter_collector_success{job=~\"$job\"}) / count by (job, instance) (tapelibrary_exporter_collector_success{job=~\"$job\"}) * 100",
+          "legendFormat": "Health % {{job}}/{{instance}}",
+          "refId": "A",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "id": 101,
+      "title": "Collector Status",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 }
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "type": "stat",
+      "id": 10,
+      "title": "Collector Status (OK / FAIL)",
+      "description": "Current pass/fail status of each collector. Green=OK, Red=FAIL: any red means that collector's last Collect() call errored, panicked, or emitted zero metrics.",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 6 },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "color": "red", "index": 0, "text": "FAIL" },
+                "1": { "color": "green", "index": 1, "text": "OK" }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "tapelibrary_exporter_collector_success{job=~\"$job\"}",
+          "legendFormat": "{{collector}} ({{job}}/{{instance}})",
+          "refId": "A",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "id": 102,
+      "title": "Collector Health History",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 12 }
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "type": "state-timeline",
+      "id": 20,
+      "title": "Collector Health - State Timeline",
+      "description": "OK/FAIL state of each collector over the selected time range. Green=OK, Red=FAIL.",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 13 },
+      "options": {
+        "mergeValues": true,
+        "showValue": "auto",
+        "alignValue": "left",
+        "fillOpacity": 85,
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "single", "sort": "none" },
+        "rowHeight": 0.9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "custom": { "fillOpacity": 85, "lineWidth": 0, "spanNulls": false },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "color": "red", "index": 0, "text": "FAIL" },
+                "1": { "color": "green", "index": 1, "text": "OK" }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "tapelibrary_exporter_collector_success{job=~\"$job\"}",
+          "legendFormat": "{{collector}} ({{job}}/{{instance}})",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "id": 103,
+      "title": "Scrape Duration",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 19 }
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "type": "status-history",
+      "id": 30,
+      "title": "Collector Scrape Duration - Status History",
+      "description": "Colored by duration thresholds: green <1s, yellow 1-5s, red >5s. Indicates how long each collector's underlying I/O is taking.",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 20 },
+      "options": {
+        "mergeValues": false,
+        "showValue": "auto",
+        "alignValue": "left",
+        "fillOpacity": 70,
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "single" },
+        "rowHeight": 0.9,
+        "colWidth": 0.9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "custom": { "fillOpacity": 70, "lineWidth": 0 },
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "tapelibrary_exporter_collector_duration_seconds{job=~\"$job\"}",
+          "legendFormat": "{{collector}} ({{job}}/{{instance}})",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "type": "bargauge",
+      "id": 31,
+      "title": "Last Scrape Duration per Collector (s)",
+      "description": "Snapshot of the most recent scrape duration per collector. Sorted slowest first.",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 26 },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true,
+        "valueMode": "color"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "min": 0,
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "sort_desc(tapelibrary_exporter_collector_duration_seconds{job=~\"$job\"})",
+          "legendFormat": "{{collector}} ({{job}}/{{instance}})",
+          "refId": "A",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "type": "timeseries",
+      "id": 32,
+      "title": "Collector Duration Over Time (s)",
+      "description": "Historical scrape duration for each collector. Useful for spotting a slow degradation before it trips ExporterCollectorDurationHigh.",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 26 },
+      "options": {
+        "legend": { "calcs": ["last", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" }
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "tapelibrary_exporter_collector_duration_seconds{job=~\"$job\"}",
+          "legendFormat": "{{collector}} ({{job}}/{{instance}})",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "id": 104,
+      "title": "Build Info",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 33 }
+    },
+    {
+      "type": "table",
+      "id": 40,
+      "title": "Go Build Info",
+      "description": "Build info for the exporter's main Go module (path, module version, checksum), from client_golang's standard build-info collector. Not the same as the exporter's own release tag: a locally-run `go build` typically reports version \"(devel)\".",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 34 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "options": {
+        "cellHeight": "sm",
+        "footer": { "show": false },
+        "showHeader": true,
+        "sortBy": []
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "custom": { "align": "left", "cellOptions": { "type": "auto" }, "inspect": false },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Path" },
+            "properties": [{ "id": "custom.width", "value": 320 }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Version" },
+            "properties": [{ "id": "custom.width", "value": 120 }]
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Value": true,
+              "__name__": true,
+              "Value #A": true
+            },
+            "renameByName": {
+              "path": "Path",
+              "version": "Version",
+              "checksum": "Checksum",
+              "job": "Job",
+              "instance": "Instance"
+            }
+          }
+        }
+      ],
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "go_build_info{job=~\"$job\"}",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "tags": ["tapelibrary", "exporter", "health"],
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "hide": 0,
+        "includeAll": false,
+        "label": "Data Source",
+        "multi": false,
+        "name": "datasource",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "type": "datasource"
+      },
+      {
+        "current": {},
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "hide": 0,
+        "includeAll": true,
+        "label": "Job",
+        "multi": true,
+        "name": "job",
+        "options": [],
+        "query": "label_values(tapelibrary_exporter_collector_success, job)",
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "tapelibrary_exporter / Exporter Health",
+  "uid": "tapelibrary-exporter-health",
+  "version": 1
+}

@@ -1,0 +1,45 @@
+# CI - the same gate as `make check`, on every pull request and every push
+# to the default branch.
+#
+# One job, one command: `make check` already bundles vet + lint + test + vuln
+# + actionlint + zizmor + deadcode + docs-check inside the pinned tools image
+# (see Makefile, scripts/docker/tools/) - running it here instead of
+# reimplementing an equivalent set of steps means CI can never drift from
+# what a contributor already ran locally before opening the PR (see
+# CONTRIBUTING.md's Definition of Done). `make race` runs alongside as its
+# own job since it is not part of `check` (see the Makefile's own comment on
+# why lint/report overlap but race stays separate).
+#
+# Neither job needs anything but Docker - it is already preinstalled on every
+# ubuntu-latest runner, and `make check`/`make race` build (or reuse) the
+# pinned tools image themselves, so no `actions/setup-go` step is needed here
+# at all.
+
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: make check
+        run: make check
+
+  race:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: make race
+        run: make race

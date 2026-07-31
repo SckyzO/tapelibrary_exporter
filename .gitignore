@@ -1,0 +1,30 @@
+# Build output. Produced by this repo's own Makefile:
+#   /bin/    - `make build`         -> bin/tapelibrary_exporter
+#   /linux/  - `make docker-build`  -> linux/<arch>/tapelibrary_exporter staging
+#              dir for the release image (self-removed on success; kept here
+#              as a safety net for a failed/interrupted run).
+/bin/
+/linux/
+
+# CycloneDX SBOM for the container image, produced by `make sbom-image`
+# (glob future-proofs against any syft output name, not just today's
+# <name>.image.cdx.json).
+*.cdx.json
+
+# Go test/coverage artifacts. No Makefile target produces these today, but
+# they are the standard names `go test -coverprofile=...` / `go test -c`
+# write to when run by hand or wired into CI later.
+*.out
+coverage.*
+*.test
+
+# Raw material gathered from the monitored target: captured output and the
+# target's own API documentation. Ignored because it is NOT anonymized and
+# may carry real hostnames, tenants or credentials, and because third-party
+# documentation carries redistribution terms this repository does not decide.
+# The README is kept tracked so the directory survives a clone: git does not
+# track empty directories. See samples/README.md.
+/samples/*
+!/samples/README.md
+
+.DS_Store

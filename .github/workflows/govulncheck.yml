@@ -1,0 +1,36 @@
+# govulncheck - Go call-graph vulnerability scanning.
+#
+# Complements Trivy (image-layer CVEs, see trivy-scan.yml) and osv-scanner
+# (`make osv`, dependency-list based): govulncheck analyses the call graph
+# and reports only vulnerabilities whose vulnerable symbol is actually
+# reachable from this code, including the standard library tied to the
+# pinned Go toolchain.
+#
+# `make vuln` already runs as part of `make check` in ci.yml on every
+# push/pull_request - this workflow's own push/pull_request triggers are
+# intentionally redundant with that, so a security-specific check stays
+# independently visible in the Checks UI. Its weekly schedule is the part
+# ci.yml cannot provide on its own: it catches a CVE disclosed after the
+# last commit, with no new push required.
+
+name: govulncheck
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  schedule:
+    - cron: '0 7 * * 1' # Mondays 07:00 UTC (offset from the other crons)
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: make vuln
+        run: make vuln
