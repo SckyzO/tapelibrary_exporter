@@ -1,0 +1,56 @@
+[
+  {
+    "volser": "TST016JA",
+    "state": "normal",
+    "accessible": "normal",
+    "cleansRemaining": 50,
+    "location": "slot_F7C3R27T4",
+    "mediaType": "3592",
+    "mostRecentUsage": "2025-12-08T14:46:13+0000"
+  },
+  {
+    "volser": "TST021JA",
+    "state": "normal",
+    "accessible": "normal",
+    "cleansRemaining": 50,
+    "location": "slot_F4C3R32T3",
+    "mediaType": "3592",
+    "mostRecentUsage": "2026-03-04T13:57:01+0000"
+  },
+  {
+    "volser": "TST021JA",
+    "state": "normal",
+    "accessible": "normal",
+    "cleansRemaining": 49,
+    "location": "slot_F6C6R19T0",
+    "mediaType": "3592",
+    "mostRecentUsage": "2026-07-24T09:40:09+0000"
+  },
+  {
+    "volser": "TST048JA",
+    "state": "normal",
+    "accessible": "normal",
+    "cleansRemaining": 50,
+    "location": "slot_F8C1R19T2",
+    "mediaType": "3592",
+    "mostRecentUsage": "2026-03-04T14:00:02+0000"
+  },
+  {
+    "volser": "TST048JA",
+    "state": "normal",
+    "accessible": "normal",
+    "cleansRemaining": 0,
+    "location": "ioSlot_F2IOuR4",
+    "mediaType": "3592",
+    "mostRecentUsage": "2026-07-15T15:08:36+0000"
+  },
+  {
+    "volser": "TST017JA",
+    "state": "normal",
+    "accessible": "normal",
+    "cleansRemaining": 0,
+    "location": "ioSlot_F2IOuR2",
+    "mediaType": "3592",
+    "mostRecentUsage": "2026-06-01T21:46:18+0000"
+  }
+]

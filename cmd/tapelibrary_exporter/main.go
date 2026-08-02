@@ -158,6 +158,352 @@ func main() {
 		},
 	})
 
+	framesTimeout := kingpin.Flag("collector.frames.timeout", "Per-request timeout for the frames collector.").Default("5s").Duration()
+	framesInterval := kingpin.Flag("collector.frames.interval", "Background refresh interval for the frames collector.").Default("5m").Duration()
+	framesEnabled := kingpin.Flag("collector.frames", "Enable the frames collector.").Default("true").Bool()
+	factories = append(factories, instance.Factory{
+		Name:    "frames",
+		Enabled: framesEnabled,
+		New: func(h *instance.Handle) (instance.BackgroundCollector, error) {
+			c, err := h.ClientFor(*framesTimeout)
+			if err != nil {
+				return nil, err
+			}
+			return collector.NewFramesCollector(log, c, *framesInterval), nil
+		},
+	})
+
+	accessorsTimeout := kingpin.Flag("collector.accessors.timeout", "Per-request timeout for the accessors collector.").Default("5s").Duration()
+	accessorsInterval := kingpin.Flag("collector.accessors.interval", "Background refresh interval for the accessors collector.").Default("5m").Duration()
+	accessorsEnabled := kingpin.Flag("collector.accessors", "Enable the accessors collector.").Default("true").Bool()
+	factories = append(factories, instance.Factory{
+		Name:    "accessors",
+		Enabled: accessorsEnabled,
+		New: func(h *instance.Handle) (instance.BackgroundCollector, error) {
+			c, err := h.ClientFor(*accessorsTimeout)
+			if err != nil {
+				return nil, err
+			}
+			return collector.NewAccessorsCollector(log, c, *accessorsInterval), nil
+		},
+	})
+
+	drivesTimeout := kingpin.Flag("collector.drives.timeout", "Per-request timeout for the drives collector.").Default("5s").Duration()
+	drivesInterval := kingpin.Flag("collector.drives.interval", "Background refresh interval for the drives collector.").Default("5m").Duration()
+	drivesEnabled := kingpin.Flag("collector.drives", "Enable the drives collector.").Default("true").Bool()
+	// Default false, and the reason is Prometheus's index rather than this
+	// exporter's memory: only 40 volsers are loaded at once, but the drive
+	// holding a given tape changes constantly, so location x volser
+	// accumulates an index entry for every pairing that has ever existed.
+	drivesPerVolser := kingpin.Flag("collector.drives.per-volser", "Emit tapelibrary_drive_loaded_cartridge_info, labelling each drive with the cartridge it currently holds. Off by default: the volser churns, so this pairing accumulates far more series in Prometheus over time than the number ever active at once.").Default("false").Bool()
+	factories = append(factories, instance.Factory{
+		Name:    "drives",
+		Enabled: drivesEnabled,
+		New: func(h *instance.Handle) (instance.BackgroundCollector, error) {
+			c, err := h.ClientFor(*drivesTimeout)
+			if err != nil {
+				return nil, err
+			}
+			return collector.NewDrivesCollector(log, c, *drivesInterval, *drivesPerVolser), nil
+		},
+	})
+
+	powerSuppliesTimeout := kingpin.Flag("collector.power_supplies.timeout", "Per-request timeout for the power_supplies collector.").Default("5s").Duration()
+	powerSuppliesInterval := kingpin.Flag("collector.power_supplies.interval", "Background refresh interval for the power_supplies collector.").Default("5m").Duration()
+	powerSuppliesEnabled := kingpin.Flag("collector.power_supplies", "Enable the power_supplies collector.").Default("true").Bool()
+	factories = append(factories, instance.Factory{
+		Name:    "power_supplies",
+		Enabled: powerSuppliesEnabled,
+		New: func(h *instance.Handle) (instance.BackgroundCollector, error) {
+			c, err := h.ClientFor(*powerSuppliesTimeout)
+			if err != nil {
+				return nil, err
+			}
+			return collector.NewPowerSuppliesCollector(log, c, *powerSuppliesInterval), nil
+		},
+	})
+
+	nodeCardsTimeout := kingpin.Flag("collector.node_cards.timeout", "Per-request timeout for the node_cards collector.").Default("5s").Duration()
+	nodeCardsInterval := kingpin.Flag("collector.node_cards.interval", "Background refresh interval for the node_cards collector.").Default("5m").Duration()
+	nodeCardsEnabled := kingpin.Flag("collector.node_cards", "Enable the node_cards collector.").Default("true").Bool()
+	factories = append(factories, instance.Factory{
+		Name:    "node_cards",
+		Enabled: nodeCardsEnabled,
+		New: func(h *instance.Handle) (instance.BackgroundCollector, error) {
+			c, err := h.ClientFor(*nodeCardsTimeout)
+			if err != nil {
+				return nil, err
+			}
+			return collector.NewNodeCardsCollector(log, c, *nodeCardsInterval), nil
+		},
+	})
+
+	ioStationsTimeout := kingpin.Flag("collector.io_stations.timeout", "Per-request timeout for the io_stations collector.").Default("5s").Duration()
+	ioStationsInterval := kingpin.Flag("collector.io_stations.interval", "Background refresh interval for the io_stations collector.").Default("5m").Duration()
+	ioStationsEnabled := kingpin.Flag("collector.io_stations", "Enable the io_stations collector.").Default("true").Bool()
+	factories = append(factories, instance.Factory{
+		Name:    "io_stations",
+		Enabled: ioStationsEnabled,
+		New: func(h *instance.Handle) (instance.BackgroundCollector, error) {
+			c, err := h.ClientFor(*ioStationsTimeout)
+			if err != nil {
+				return nil, err
+			}
+			return collector.NewIOStationsCollector(log, c, *ioStationsInterval), nil
+		},
+	})
+
+	fcPortsTimeout := kingpin.Flag("collector.fc_ports.timeout", "Per-request timeout for the fc_ports collector.").Default("5s").Duration()
+	fcPortsInterval := kingpin.Flag("collector.fc_ports.interval", "Background refresh interval for the fc_ports collector.").Default("5m").Duration()
+	fcPortsEnabled := kingpin.Flag("collector.fc_ports", "Enable the fc_ports collector.").Default("true").Bool()
+	factories = append(factories, instance.Factory{
+		Name:    "fc_ports",
+		Enabled: fcPortsEnabled,
+		New: func(h *instance.Handle) (instance.BackgroundCollector, error) {
+			c, err := h.ClientFor(*fcPortsTimeout)
+			if err != nil {
+				return nil, err
+			}
+			return collector.NewFCPortsCollector(log, c, *fcPortsInterval), nil
+		},
+	})
+
+	logicalLibrariesTimeout := kingpin.Flag("collector.logical_libraries.timeout", "Per-request timeout for the logical_libraries collector.").Default("5s").Duration()
+	logicalLibrariesInterval := kingpin.Flag("collector.logical_libraries.interval", "Background refresh interval for the logical_libraries collector.").Default("5m").Duration()
+	logicalLibrariesEnabled := kingpin.Flag("collector.logical_libraries", "Enable the logical_libraries collector.").Default("true").Bool()
+	factories = append(factories, instance.Factory{
+		Name:    "logical_libraries",
+		Enabled: logicalLibrariesEnabled,
+		New: func(h *instance.Handle) (instance.BackgroundCollector, error) {
+			c, err := h.ClientFor(*logicalLibrariesTimeout)
+			if err != nil {
+				return nil, err
+			}
+			return collector.NewLogicalLibrariesCollector(log, c, *logicalLibrariesInterval), nil
+		},
+	})
+
+	cleaningCartridgesTimeout := kingpin.Flag("collector.cleaning_cartridges.timeout", "Per-request timeout for the cleaning_cartridges collector.").Default("5s").Duration()
+	cleaningCartridgesInterval := kingpin.Flag("collector.cleaning_cartridges.interval", "Background refresh interval for the cleaning_cartridges collector.").Default("5m").Duration()
+	cleaningCartridgesEnabled := kingpin.Flag("collector.cleaning_cartridges", "Enable the cleaning_cartridges collector.").Default("true").Bool()
+	// Default TRUE, the inverse of --collector.drives.per-volser, and the only
+	// per-item detail in this exporter that ships on. The population is bounded
+	// by the site's cleaning policy (70 on this fleet) rather than by library
+	// capacity, and a cleaning cartridge sits in one slot until it is used or
+	// exported, so its volser does not churn the way a drive's loaded volser
+	// does. Naming the exhausted cartridge is also the point of the collector.
+	// Turning it off costs that detail and nothing else: the three supply
+	// alerts read library-wide aggregates that are emitted either way.
+	cleaningCartridgesPerVolser := kingpin.Flag("collector.cleaning_cartridges.per-volser", "Emit tapelibrary_cleaning_cartridge_cleans_remaining and tapelibrary_cleaning_cartridge_last_usage_timestamp_seconds, one of each per cleaning cartridge. On by default: the population is bounded by cleaning policy rather than library capacity, and only the per-cartridge series can name which cartridge to pull. Turn it off on a site running cleaning cartridges in the thousands; the library-wide aggregates the alerts read are emitted regardless.").Default("true").Bool()
+	factories = append(factories, instance.Factory{
+		Name:    "cleaning_cartridges",
+		Enabled: cleaningCartridgesEnabled,
+		New: func(h *instance.Handle) (instance.BackgroundCollector, error) {
+			c, err := h.ClientFor(*cleaningCartridgesTimeout)
+			if err != nil {
+				return nil, err
+			}
+			return collector.NewCleaningCartridgesCollector(log, c, *cleaningCartridgesInterval, *cleaningCartridgesPerVolser), nil
+		},
+	})
+
+	// The first collector in this exporter whose timeout and interval defaults
+	// depart from the shared 5s/5m, and the furthest: slots below is the only
+	// other one, at 30s/15m. Both departures are the endpoint's rather than a
+	// preference. /v1/dataCartridges returns every cartridge the
+	// library holds — 9 749 on this fleet — unpaginated, over the same slow
+	// SCSI/LCC-backed path docs/exporter-journal.md names when it explains why
+	// this build is multi-instance at all. 5s does not fetch that, so a 5s
+	// default would ship a collector that fails every refresh and serves a
+	// permanently empty cache.
+	//
+	// The interval moves with it. At a ceiling of one in-flight request per
+	// library, a refresh this long blocks its seventeen siblings while it runs,
+	// so it is run less often rather than more: the inventory turns over in
+	// hours, not seconds, and nothing here is worth a minute of queueing every
+	// five. That delay stays observable rather than hidden, through
+	// tapelibrary_exporter_request_wait_seconds.
+	dataCartridgesTimeout := kingpin.Flag("collector.data_cartridges.timeout", "Per-request timeout for the data_cartridges collector. Defaults higher than every other collector: this endpoint returns the library's entire cartridge inventory unpaginated over a slow path.").Default("60s").Duration()
+	dataCartridgesInterval := kingpin.Flag("collector.data_cartridges.interval", "Background refresh interval for the data_cartridges collector. Defaults longer than every other collector: a refresh holds the library's single request slot for as long as it runs, and a cartridge inventory does not turn over in minutes.").Default("15m").Duration()
+	dataCartridgesEnabled := kingpin.Flag("collector.data_cartridges", "Enable the data_cartridges collector.").Default("true").Bool()
+	// Default FALSE, matching --collector.drives.per-volser and inverting
+	// --collector.cleaning_cartridges.per-volser. The population is bounded by
+	// library capacity rather than by any policy, so this is ~29 250 series per
+	// library and ~146 000 across the fleet, against the ~2 425 per library the
+	// exporter costs at defaults. That is a Prometheus sizing decision, so it is
+	// the operator's to take. Turning it on adds detail and silences nothing:
+	// every aggregate the alerts read is emitted either way.
+	dataCartridgesPerVolser := kingpin.Flag("collector.data_cartridges.per-volser", "Emit tapelibrary_data_cartridge_info, tapelibrary_data_cartridge_lifetime_remaining_ratio and tapelibrary_data_cartridge_last_usage_timestamp_seconds, one of each per data cartridge. Off by default: at ~9 750 cartridges per library this is ~29 250 extra series per library and ~146 000 across a five-library fleet. The library-wide aggregates the alerts read are emitted regardless.").Default("false").Bool()
+	factories = append(factories, instance.Factory{
+		Name:    "data_cartridges",
+		Enabled: dataCartridgesEnabled,
+		New: func(h *instance.Handle) (instance.BackgroundCollector, error) {
+			c, err := h.ClientFor(*dataCartridgesTimeout)
+			if err != nil {
+				return nil, err
+			}
+			return collector.NewDataCartridgesCollector(log, c, *dataCartridgesInterval, *dataCartridgesPerVolser), nil
+		},
+	})
+
+	// The second collector whose defaults depart from the shared 5s/5m, and it
+	// departs by less than data_cartridges does. /v1/slots walks the library's
+	// whole slot inventory over the same slow SCSI/LCC path, but it returns one
+	// entry per slot COLUMN rather than per cartridge — roughly 4 300 entries
+	// against dataCartridges' 9 749, at about a third of the bytes each — so
+	// 30s is the middle ground between a 5s default that would fail every
+	// refresh and a 60s one this endpoint does not need.
+	//
+	// The interval matches data_cartridges at 15m rather than splitting the
+	// difference, because the two describe the same physical movement: a
+	// cartridge changing slots changes both. At a ceiling of one in-flight
+	// request per library there is nothing to gain from learning about it twice
+	// as often on one endpoint as on the other, and the queueing stays visible
+	// in tapelibrary_exporter_request_wait_seconds.
+	//
+	// Neither figure is measured. docs/exporter-journal.md carries the standing
+	// open question that per-endpoint cadences were never calibrated on this
+	// fleet; these are sized against the capture, and are the operator's to
+	// adjust once somebody times a real refresh.
+	slotsTimeout := kingpin.Flag("collector.slots.timeout", "Per-request timeout for the slots collector. Defaults higher than most collectors: this endpoint returns the library's entire slot inventory unpaginated over a slow path.").Default("30s").Duration()
+	slotsInterval := kingpin.Flag("collector.slots.interval", "Background refresh interval for the slots collector. Defaults longer than most collectors: a refresh holds the library's single request slot for as long as it runs, and slot occupancy turns over at the same rate as the cartridge inventory.").Default("15m").Duration()
+	slotsEnabled := kingpin.Flag("collector.slots", "Enable the slots collector.").Default("true").Bool()
+	// Default FALSE, matching --collector.data_cartridges.per-volser. The
+	// population is bounded by library capacity rather than by any policy: the
+	// library reports 10 732 cartridge POSITIONS, which at this fleet's mix of
+	// 1- and 4-tier slots is somewhere near 4 300 slot entries and so roughly
+	// 21 500 extra series per library. That is a Prometheus sizing decision, so
+	// it is the operator's to take. Turning it on adds detail and silences
+	// nothing: every aggregate the alerts read is emitted either way.
+	slotsPerSlot := kingpin.Flag("collector.slots.per-slot", "Emit tapelibrary_slot_info, tapelibrary_slot_positions_occupied and the three per-slot lifetime counters, one of each per storage slot. Off by default: at roughly 4 300 slots per library this is about 21 500 extra series per library and five times that across the fleet. The library-wide aggregates the alerts read are emitted regardless; turn it on to name which slot a rising retry rate is coming from.").Default("false").Bool()
+	factories = append(factories, instance.Factory{
+		Name:    "slots",
+		Enabled: slotsEnabled,
+		New: func(h *instance.Handle) (instance.BackgroundCollector, error) {
+			c, err := h.ClientFor(*slotsTimeout)
+			if err != nil {
+				return nil, err
+			}
+			return collector.NewSlotsCollector(log, c, *slotsInterval, *slotsPerSlot), nil
+		},
+	})
+
+	// The only collector in this exporter that reads a log rather than a
+	// hardware inventory, and the only one whose request carries a query
+	// parameter. Both defaults return to the shared 5s/5m, and that is the
+	// endpoint's doing rather than a reversion to taste: bounded by lookback
+	// below, GET /v1/events returns the handful of entries the library raised
+	// in the last hour — 42 over a 3h45m span in the 2026-07-28 capture — so it
+	// is one of the cheapest endpoints here, not one of the heaviest.
+	eventsTimeout := kingpin.Flag("collector.events.timeout", "Per-request timeout for the events collector.").Default("5s").Duration()
+	eventsInterval := kingpin.Flag("collector.events.interval", "Background refresh interval for the events collector.").Default("5m").Duration()
+	eventsEnabled := kingpin.Flag("collector.events", "Enable the events collector.").Default("true").Bool()
+	// Not a tuning knob: without it this collector is unusable. R1.11.2 states
+	// that a bare GET /v1/events "retrieves a list of all events", and the
+	// 2026-07-28 capture carries IDs past 19 400, so an unbounded request would
+	// re-download the library's entire event history every interval over the
+	// slow SCSI/LCC path, holding the library's single request slot against its
+	// seventeen siblings to report on the last hour.
+	//
+	// 1h against a 5m interval is deliberately generous. The window is a
+	// trailing one recomputed at every refresh, so it only has to exceed the
+	// interval for no event to fall in a gap; the remaining 55 minutes are
+	// slack against clock skew between this host and the library, which is the
+	// one failure mode that would silently empty the window rather than
+	// announcing itself (a library whose clock trails this host by more than
+	// the lookback returns nothing, and the refresh still succeeds).
+	eventsLookback := kingpin.Flag("collector.events.lookback", "How far back the events collector asks the library to look, sent as the endpoint's `after` parameter. Must exceed --collector.events.interval or events raised between two refreshes are never counted. Also absorbs clock skew between this host and the library.").Default("1h").Duration()
+	// Empty by default, which suppresses tapelibrary_events_by_code entirely.
+	// errorCode is a 4-digit hex code — up to 65 536 values — and R1.11.2
+	// enumerates none of them, so it is a cardinality risk that cannot be
+	// budgeted in advance (see docs/exporter-journal.md, "Open questions").
+	// Naming codes explicitly is the bounded form: an operator adds the handful
+	// their fleet actually raises, once they have seen them. The severity
+	// breakdown every alert reads is emitted regardless.
+	eventsErrorCodes := kingpin.Flag("collector.events.error-codes", "Comma-separated library error codes to break out as tapelibrary_events_by_code, e.g. \"B792,0217\". Empty by default: errorCode is an unenumerated 4-digit hex field, so only codes named here get their own series. Matching is case-insensitive.").Default("").String()
+	factories = append(factories, instance.Factory{
+		Name:    "events",
+		Enabled: eventsEnabled,
+		New: func(h *instance.Handle) (instance.BackgroundCollector, error) {
+			c, err := h.ClientFor(*eventsTimeout)
+			if err != nil {
+				return nil, err
+			}
+			return collector.NewEventsCollector(log, c, *eventsInterval, *eventsLookback, *eventsErrorCodes), nil
+		},
+	})
+
+	// The third collector to depart from the shared 5s/5m, and the only one to
+	// take data_cartridges' figures outright rather than deriving its own.
+	//
+	// GET /v1/dataCartridges/lifetimeMetrics walks the SAME population as
+	// GET /v1/dataCartridges — one entry per cartridge, 9 749 on this library,
+	// unpaginated over the same slow SCSI/LCC path — and reads each cartridge's
+	// own memory to do it. It returns fewer bytes per entry (roughly 280 against
+	// 640 in the 2026-07-28 capture), but the bytes are not what makes this
+	// endpoint slow: walking the inventory is, and that walk is identical. So
+	// the timeout matches at 60s rather than being scaled down by the byte
+	// ratio, which would ship a collector that fails every refresh.
+	//
+	// The interval matches at 15m for a second reason on top of that one: the
+	// two endpoints describe the same cartridges, and at a ceiling of one
+	// in-flight request per library there is nothing to gain from learning about
+	// one twice as often as the other. Lifetime counters move slower than
+	// inventory, if anything. The queueing stays visible in
+	// tapelibrary_exporter_request_wait_seconds.
+	//
+	// Neither figure is measured. docs/exporter-journal.md carries the standing
+	// open question that per-endpoint cadences were never calibrated on this
+	// fleet; these are sized against the capture, and are the operator's to
+	// adjust once somebody times a real refresh.
+	dataCartridgesLifetimeTimeout := kingpin.Flag("collector.data_cartridges_lifetime.timeout", "Per-request timeout for the data_cartridges_lifetime collector. Defaults as high as the data_cartridges collector: this endpoint walks the library's entire cartridge inventory unpaginated over the same slow path, reading each cartridge's own memory.").Default("60s").Duration()
+	dataCartridgesLifetimeInterval := kingpin.Flag("collector.data_cartridges_lifetime.interval", "Background refresh interval for the data_cartridges_lifetime collector. Defaults as long as the data_cartridges collector: a refresh holds the library's single request slot for as long as it runs, and lifetime counters move slower than the inventory itself.").Default("15m").Duration()
+	dataCartridgesLifetimeEnabled := kingpin.Flag("collector.data_cartridges_lifetime", "Enable the data_cartridges_lifetime collector.").Default("true").Bool()
+	// Default FALSE, matching --collector.data_cartridges.per-volser and
+	// --collector.slots.per-slot. This is the largest per-object cost in the
+	// exporter: seven series per cartridge against data_cartridges' three, so
+	// ~68 250 per library and ~341 000 across the fleet. That is a Prometheus
+	// sizing decision, so it is the operator's to take. Turning it on adds
+	// detail and silences nothing: every aggregate the alerts read is emitted
+	// either way.
+	dataCartridgesLifetimePerVolser := kingpin.Flag("collector.data_cartridges_lifetime.per-volser", "Emit tapelibrary_data_cartridge_usage_motion_meters_total, _mounts_total, _written_bytes_total and the four _errors_total combinations, one set per data cartridge. Off by default: at ~9 750 cartridges per library this is ~68 250 extra series per library and ~341 000 across a five-library fleet. The library-wide distributions the alerts read are emitted regardless; turn it on to name which cartridge a rising uncorrected-error count is coming from.").Default("false").Bool()
+	factories = append(factories, instance.Factory{
+		Name:    "data_cartridges_lifetime",
+		Enabled: dataCartridgesLifetimeEnabled,
+		New: func(h *instance.Handle) (instance.BackgroundCollector, error) {
+			c, err := h.ClientFor(*dataCartridgesLifetimeTimeout)
+			if err != nil {
+				return nil, err
+			}
+			return collector.NewDataCartridgesLifetimeCollector(log, c, *dataCartridgesLifetimeInterval, *dataCartridgesLifetimePerVolser), nil
+		},
+	})
+
+	// The interval is the first one in this file chosen against the DATA's own
+	// cadence rather than against the endpoint's cost. R1.11.2 records one
+	// report per completed hour, so there is nothing new to fetch more often
+	// than hourly; 15m is a quarter of that, which bounds how long a freshly
+	// published window sits unseen without pretending the exporter can resolve
+	// anything finer. Polling at 5m like the hardware collectors would triple
+	// the requests to serve the same four values an hour.
+	//
+	// The timeout stays at the 5s default: the response is the last week of
+	// hourly entries, ~67 KB, and needs no inventory walk.
+	reportsLibraryTimeout := kingpin.Flag("collector.reports_library.timeout", "Per-request timeout for the reports_library collector.").Default("5s").Duration()
+	reportsLibraryInterval := kingpin.Flag("collector.reports_library.interval", "Background refresh interval for the reports_library collector. Defaults to a quarter of the endpoint's own hourly cadence: R1.11.2 publishes one report per completed hour, so polling faster returns the same window again.").Default("15m").Duration()
+	reportsLibraryEnabled := kingpin.Flag("collector.reports_library", "Enable the reports_library collector.").Default("true").Bool()
+	factories = append(factories, instance.Factory{
+		Name:    "reports_library",
+		Enabled: reportsLibraryEnabled,
+		New: func(h *instance.Handle) (instance.BackgroundCollector, error) {
+			c, err := h.ClientFor(*reportsLibraryTimeout)
+			if err != nil {
+				return nil, err
+			}
+			return collector.NewReportsLibraryCollector(log, c, *reportsLibraryInterval), nil
+		},
+	})
+
 	kingpin.Version(version.Print("tapelibrary_exporter"))
 	kingpin.HelpFlag.Short('h')
 

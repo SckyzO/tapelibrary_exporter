@@ -1,0 +1,102 @@
+[
+  {
+    "location": "slot_F1C9R2",
+    "state": "normal",
+    "contents": [
+      "TST174JD",
+      "TST175JD",
+      "TST176JD",
+      "TST177JD"
+    ],
+    "puts": 1163,
+    "putRetries": 0,
+    "getRetries": 1,
+    "tiers": 4
+  },
+  {
+    "location": "slot_F1C3R10",
+    "state": "normal",
+    "contents": [
+      null,
+      null,
+      null,
+      null
+    ],
+    "puts": 1,
+    "putRetries": 0,
+    "getRetries": 0,
+    "tiers": 4
+  },
+  {
+    "location": "slot_F1C4R1",
+    "state": "normal",
+    "contents": [
+      "TST082JK"
+    ],
+    "puts": 27,
+    "putRetries": 0,
+    "getRetries": 8,
+    "tiers": 1
+  },
+  {
+    "location": "slot_F1C4R3",
+    "state": "normal",
+    "contents": [
+      null
+    ],
+    "puts": 3,
+    "putRetries": 0,
+    "getRetries": 10,
+    "tiers": 1
+  },
+  {
+    "location": "slot_F2C1R1",
+    "state": "inServiceMode",
+    "contents": [
+      "TST152JD",
+      "TST153JD",
+      "TST154JD",
+      "TST155JD"
+    ],
+    "puts": 1315,
+    "putRetries": 0,
+    "getRetries": 5,
+    "tiers": 4
+  },
+  {
+    "location": "slot_F5C7R14",
+    "state": "inServiceMode",
+    "contents": [
+      "TST165JD",
+      "TST166JD",
+      "TST167JD",
+      "TST078JA"
+    ],
+    "puts": 560,
+    "putRetries": 0,
+    "getRetries": 0,
+    "tiers": 4
+  },
+  {
+    "location": "slot_F6C2R4",
+    "state": "inServiceMode",
+    "contents": [
+      "TST168JD"
+    ],
+    "puts": 3265,
+    "putRetries": 0,
+    "getRetries": 1,
+    "tiers": 1
+  },
+  {
+    "location": "slot_F11C2R2",
+    "state": "inServiceMode",
+    "contents": [
+      null
+    ],
+    "puts": 50,
+    "putRetries": 0,
+    "getRetries": 8,
+    "tiers": 1
+  }
+]

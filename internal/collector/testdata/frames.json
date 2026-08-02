@@ -1,0 +1,47 @@
+[
+  {
+    "location": "frame_F1",
+    "state": "normal",
+    "type": "expansion",
+    "mtm": "3584-D25",
+    "sn": "SN00000001",
+    "mediaType": "3592",
+    "frontDoor": "closed",
+    "rearDoor": null,
+    "sideDoor": "closed",
+    "slots": 590,
+    "cartridges": 141,
+    "drives": 4,
+    "ioStations": 0
+  },
+  {
+    "location": "frame_F2",
+    "state": "normal",
+    "type": "base",
+    "mtm": "3584-L25",
+    "sn": "SN00000002",
+    "mediaType": "3592",
+    "frontDoor": "closed",
+    "rearDoor": null,
+    "sideDoor": "closed",
+    "slots": 660,
+    "cartridges": 661,
+    "drives": 16,
+    "ioStations": 2
+  },
+  {
+    "location": "frame_F3",
+    "state": "normal",
+    "type": "storageOnlyExpansion",
+    "mtm": "3584-S25",
+    "sn": "SN00000003",
+    "mediaType": "3592",
+    "frontDoor": "closed",
+    "rearDoor": null,
+    "sideDoor": "closed",
+    "slots": 1000,
+    "cartridges": 991,
+    "drives": 0,
+    "ioStations": 0
+  }
+]

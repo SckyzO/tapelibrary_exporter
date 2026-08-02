@@ -200,6 +200,1185 @@ groups:
           description: 'Library {{ $labels.library }} is {{ printf "%.1f" $value }} full against its own configured capacity utilization threshold, for 30 minutes. Imports will start failing once no licensed slot is free.'
 
       # ──────────────────────────────────────────────────────────────────
+      # Business: FramesCollector (added via /add-collector)
+      # ──────────────────────────────────────────────────────────────────
+      #
+      # Same stateset contract as LibraryCollector above, one series per
+      # documented frame state, exactly one at 1, so severity is changed by
+      # moving a state between the two rules below rather than by rebuilding
+      # the exporter. {{ $labels.location }} names the frame (frame_F1,
+      # frame_F2, ...) in the library's own GUI spelling.
+      #
+      # The door states the legacy RoS scripts classify (frontDoorOpen,
+      # rearDoorOpen, sideDoorOpen) are deliberately absent from both
+      # selectors: R1.11.2 does not define them as frame states at all, so
+      # those legacy rules have been dead rather than quiet. The door signal
+      # is real and is covered by FrameDoorOpen below, against the separate
+      # tapelibrary_frame_door_open gauge. See docs/exporter-journal.md,
+      # "Open questions".
+      #
+      # "unknown" is in neither rule: unclassified, not known-benign. The
+      # legacy scripts never mapped it, exactly as with the library statuses
+      # above. Confirm its intended severity before this file is complete.
+      - alert: FrameDegraded
+        expr: tapelibrary_frame_state{state=~"calibrationRequired|inventoryPending"} == 1
+        for: 30m
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter frame {{ $labels.location }} on library {{ $labels.library }} degraded ({{ $labels.state }})'
+          description: 'Frame {{ $labels.location }} on library {{ $labels.library }} has reported state {{ $labels.state }} for 30 minutes. Its inventory or calibration is not trustworthy until this clears.'
+
+      - alert: FrameDegraded
+        expr: tapelibrary_frame_state{state=~"frontDoorOpenWhileNotAllowed|acUnreachable"} == 1
+        for: 30m
+        labels:
+          severity: critical
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter frame {{ $labels.location }} on library {{ $labels.library }} critically degraded ({{ $labels.state }})'
+          description: 'Frame {{ $labels.location }} on library {{ $labels.library }} has reported state {{ $labels.state }} for 30 minutes. The frame has lost AC power or was opened while the accessor was moving: this needs an operator now.'
+
+      # The re-derived door rule. 30m is a DEFAULT to adjust per deployment,
+      # not a measured threshold: it matches the LibraryDegraded doorOpen rule
+      # above so the two fire together, and it is long enough that a routine
+      # cartridge load does not page. A site whose operators regularly work
+      # inside a frame for longer should raise it rather than silence the rule.
+      #
+      # This is deliberately not folded into FrameDegraded: an open door is a
+      # separate metric here (see docs/metrics.md), and keeping it separate is
+      # what makes "which frame is open" answerable, which the library-level
+      # doorOpen status cannot tell you.
+      - alert: FrameDoorOpen
+        expr: tapelibrary_frame_door_open == 1
+        for: 30m
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter frame {{ $labels.location }} on library {{ $labels.library }} has its {{ $labels.door }} door open'
+          description: 'The {{ $labels.door }} door of frame {{ $labels.location }} on library {{ $labels.library }} has been open for 30 minutes. The library pauses robotics while a frame is open, so mounts are queueing behind it.'
+
+      # ──────────────────────────────────────────────────────────────────
+      # Business: AccessorsCollector (added via /add-collector)
+      # ──────────────────────────────────────────────────────────────────
+      #
+      # Same stateset contract as LibraryCollector and FramesCollector above,
+      # one series per known accessor state, exactly one at 1, so severity is
+      # changed by moving a state between the two rules below rather than by
+      # rebuilding the exporter. {{ $labels.location }} names the accessor
+      # (accessor_Aa, accessor_Ab) in the library's own spelling.
+      #
+      # Two departures from the legacy RoS classification in samples/legacy/,
+      # both recorded in docs/exporter-journal.md:
+      #
+      #   - reorienting is gone, replaced by calibrating. The scripts expect
+      #     reorienting; R1.11.2 documents the same phase as calibrating, so
+      #     the legacy selector can never have matched on this firmware. This
+      #     is the second of the four legacy-vs-manual contradictions, resolved
+      #     the same way the frame door pseudo-states were.
+      #   - failedToInitialize is added to the critical rule, and is the one
+      #     selector here that comes from neither the scripts nor the state
+      #     table. The scripts do not know the value exists; the manual names
+      #     it only in prose, in the description of the library status
+      #     accessorsUnavailable, alongside noMovementAllowed and
+      #     bothGrippersFailed — the other two members of the critical rule
+      #     below. That is IBM's own grouping, not a guess, but confirm it.
+      - alert: AccessorDegraded
+        expr: tapelibrary_accessor_state{state=~"gripper1Failed|gripper2Failed|scannerFailed|noMotorPower|calibrating|onlineStandby|inServiceMode"} == 1
+        for: 30m
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter accessor {{ $labels.location }} on library {{ $labels.library }} degraded ({{ $labels.state }})'
+          description: 'Accessor {{ $labels.location }} on library {{ $labels.library }} has reported state {{ $labels.state }} for 30 minutes. It is either running on one gripper, deliberately parked, or unable to move cartridges: mounts still complete, but there is no robotics headroom left.'
+
+      - alert: AccessorDegraded
+        expr: tapelibrary_accessor_state{state=~"noMovementAllowed|bothGrippersFailed|failedToInitialize"} == 1
+        for: 30m
+        labels:
+          severity: critical
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter accessor {{ $labels.location }} on library {{ $labels.library }} critically degraded ({{ $labels.state }})'
+          description: 'Accessor {{ $labels.location }} on library {{ $labels.library }} has reported state {{ $labels.state }} for 30 minutes. This accessor can no longer move media: this needs an operator now.'
+
+      # The redundancy rule, and the safety net for any state in neither
+      # selector above. Both sides aggregate the SAME series: the right side
+      # counts the accessors reporting at all, the left sums the value of
+      # their onlineActive series, which is 1 only on an accessor that is
+      # actually working. It therefore fires whenever any accessor is not
+      # active, whatever the reason, including a state nobody has classified
+      # yet — and it needs no hardcoded accessor count, so it is correct on a
+      # single-accessor library too.
+      #
+      # A library whose accessors collector has stopped refreshing emits no
+      # series here at all and so cannot fire this rule. That gap is covered
+      # by the collector-health rules above, not by this one.
+      - alert: AccessorNotFullyAvailable
+        expr: >
+          sum by (job,library) (tapelibrary_accessor_state{state="onlineActive"})
+            < count by (job,library) (tapelibrary_accessor_state{state="onlineActive"})
+        for: 30m
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter library {{ $labels.library }} is down to {{ $value }} active accessor(s)'
+          description: 'Library {{ $labels.library }} has had only {{ $value }} of its accessors in the onlineActive state for 30 minutes. Mount throughput is reduced, and on a dual-accessor library the remaining robot is now a single point of failure.'
+
+      # Reachability, which the state stateset cannot express: an accessor can
+      # be onlineActive and still be unable to reach half the library because
+      # the OTHER accessor is parked in the way. Two rules rather than one
+      # because both metrics carry an identical label set, so `or` between
+      # them would silently drop the second whenever both fire.
+      #
+      # 30m matches the rules above. This is a re-derived DEFAULT, not a
+      # measured threshold: the legacy scripts emitted both fields at a
+      # constant 0 and never alerted on either, so nobody has data on how long
+      # a blocking position legitimately persists at this site. Watch the
+      # first weeks of these two metrics and adjust.
+      - alert: AccessorDriveAccessLimited
+        expr: tapelibrary_accessor_drive_access{access="limited"} == 1
+        for: 30m
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter accessor {{ $labels.location }} on library {{ $labels.library }} cannot reach all drives'
+          description: 'Accessor {{ $labels.location }} on library {{ $labels.library }} has reported limited drive access for 30 minutes. Some drives are unreachable for this accessor, so mounts targeting them queue behind the other accessor or fail.'
+
+      - alert: AccessorCartridgeAccessLimited
+        expr: tapelibrary_accessor_cartridge_access{access="limited"} == 1
+        for: 30m
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter accessor {{ $labels.location }} on library {{ $labels.library }} cannot reach all cartridges'
+          description: 'Accessor {{ $labels.location }} on library {{ $labels.library }} has reported limited cartridge access for 30 minutes. Part of the inventory is unreachable for this accessor, typically because the other accessor is parked in a blocking position.'
+
+      # ──────────────────────────────────────────────────────────────────
+      # Business: DrivesCollector (added via /add-collector)
+      # ──────────────────────────────────────────────────────────────────
+      #
+      # Same stateset contract as the three collectors above, one series per
+      # known drive state, exactly one at 1, so severity is changed by moving a
+      # state between the two rules below rather than by rebuilding the
+      # exporter. {{ $labels.location }} names the drive (drive_F1C4R1) in the
+      # library's own spelling.
+      #
+      # 1h rather than the 30m used above, carried over from the legacy RoS
+      # classification in samples/legacy/: a drive restart, a firmware update
+      # and a cleaning cycle are all routine operations that legitimately take
+      # tens of minutes, and none of them needs a page while it is in progress.
+      #
+      # unknown and cleaning are in neither rule, and are unclassified rather
+      # than known-benign: cleaning is the library doing exactly what it should,
+      # and the legacy scripts never mapped unknown. See the same gap recorded
+      # for five library statuses in docs/exporter-journal.md.
+      - alert: DriveDegraded
+        expr: tapelibrary_drive_state{state=~"restarting|initializing|resetRequired|updating|inServiceMode"} == 1
+        for: 1h
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter drive {{ $labels.location }} on library {{ $labels.library }} degraded ({{ $labels.state }})'
+          description: 'Drive {{ $labels.location }} in logical library {{ $labels.logical_library }} on {{ $labels.library }} has reported state {{ $labels.state }} for 1 hour. It is not available for mounts, and a routine operation that has run this long has probably stalled.'
+
+      - alert: DriveDegraded
+        expr: tapelibrary_drive_state{state="unreachable"} == 1
+        for: 1h
+        labels:
+          severity: critical
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter drive {{ $labels.location }} on library {{ $labels.library }} is unreachable'
+          description: 'Drive {{ $labels.location }} in logical library {{ $labels.logical_library }} on {{ $labels.library }} has been unreachable for 1 hour. The library cannot communicate with it at all: any cartridge left inside it is stranded until an operator intervenes.'
+
+      # Reachability, which the state stateset cannot express: a drive can be
+      # online and still have no accessor able to reach it. Two rules rather
+      # than one because the two selectors carry an identical label set, so `or`
+      # between them would silently drop the second whenever both fire — the
+      # same reason the two accessor access rules above are separate.
+      #
+      # 30m here rather than the 1h above, and deliberately: a blocked path is
+      # not a routine operation running long, it is a robot that cannot get
+      # somewhere. This is still a re-derived DEFAULT — the legacy scripts never
+      # alerted on this field — so watch the first weeks and adjust.
+      - alert: DriveAccessLimited
+        expr: tapelibrary_drive_access{access="limited"} == 1
+        for: 30m
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter drive {{ $labels.location }} on library {{ $labels.library }} is only partly reachable'
+          description: 'Drive {{ $labels.location }} in logical library {{ $labels.logical_library }} on {{ $labels.library }} has reported limited accessor reach for 30 minutes. Mounts targeting it queue behind whichever accessor can still get there, or fail.'
+
+      - alert: DriveAccessLimited
+        expr: tapelibrary_drive_access{access="no"} == 1
+        for: 30m
+        labels:
+          severity: critical
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter drive {{ $labels.location }} on library {{ $labels.library }} cannot be reached at all'
+          description: 'Drive {{ $labels.location }} in logical library {{ $labels.logical_library }} on {{ $labels.library }} has been unreachable by any accessor for 30 minutes. No cartridge can be mounted in or removed from it, however healthy the drive itself reports.'
+
+      # Capacity, per logical library rather than per drive. This is the rule
+      # logical_library rides on the state stateset for: it is a plain ratio of
+      # two aggregations over one metric, with no group_left join against the
+      # info series.
+      #
+      # Both sides aggregate the SAME series: the numerator sums the value of
+      # the online series (1 only on a drive that is actually online), the
+      # denominator counts the drives reporting at all. 0.8 is a round-number
+      # DEFAULT to adjust per deployment, not a measured threshold. It is a
+      # ratio and not the "all drives online" shape the accessor redundancy rule
+      # uses, because 40 drives is a population where one being in service mode
+      # is normal — the 2026-07-28 capture already shows exactly that, and an
+      # all-online rule would fire permanently on this fleet.
+      - alert: LogicalLibraryDrivesBelowFloor
+        expr: >
+          sum by (job,library,logical_library) (tapelibrary_drive_state{state="online"})
+            / count by (job,library,logical_library) (tapelibrary_drive_state{state="online"})
+            < 0.8
+        for: 1h
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter logical library {{ $labels.logical_library }} on {{ $labels.library }} is down to {{ $value }} of its drives'
+          description: 'Only {{ $value }} (as a fraction of 1) of the drives in logical library {{ $labels.logical_library }} on {{ $labels.library }} have been online for 1 hour. Mount throughput for this logical library is reduced; adjust the 0.8 threshold to this site''s real drive count and tolerance.'
+
+      # Control-path redundancy. A control-path drive is how the host talks to
+      # the library at all: lose every one of them in a logical library and the
+      # host stops seeing the library, however healthy the remaining data drives
+      # report. Nothing else on this endpoint distinguishes the two roles, which
+      # is why `use` ships on the info series.
+      #
+      # This is the one rule here that needs a join, because `use` is an
+      # identity string and lives on the info series rather than on a
+      # measurement one. group_left() is load-bearing: a plain `on(...)` would
+      # drop logical_library from the result and break the aggregation.
+      #
+      # < 2 is a DEFAULT: the 2026-07-28 capture shows four control-path drives
+      # in each logical library, so 2 is half of what this fleet runs. A site
+      # with only two should raise this rule to < 2 meaning "no redundancy left"
+      # and add a critical rule at < 1.
+      - alert: ControlPathRedundancyLost
+        expr: >
+          count by (job,library,logical_library) (
+            (tapelibrary_drive_state{state="online"} == 1)
+              * on (job,library,location) group_left() tapelibrary_drive_info{use="controlPath"}
+          ) < 2
+        for: 30m
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter logical library {{ $labels.logical_library }} on {{ $labels.library }} is down to {{ $value }} control-path drive(s)'
+          description: 'Logical library {{ $labels.logical_library }} on {{ $labels.library }} has had only {{ $value }} control-path drive(s) online for 30 minutes. The host reaches the library through these drives: when the last one goes, the library disappears from the host regardless of how many data drives remain.'
+
+      # No rule ships on tapelibrary_drive_last_cleaned_timestamp_seconds. The
+      # metric has a real direction (too long since the last cleaning), but no
+      # grounded threshold exists for it: the legacy scripts never collected the
+      # field, and the underlying cause an overdue drive would be a symptom of —
+      # cleaning cartridges running out — is covered with a real, ported
+      # threshold by the planned cleaning_cartridges rules (< 100 warning, < 30
+      # critical, verbatim from samples/legacy/). Adding a made-up "90 days"
+      # here would page on an arbitrary number while that rule pages on a
+      # measured one.
+
+      # ──────────────────────────────────────────────────────────────────
+      # Business: PowerSuppliesCollector (added via /add-collector)
+      # ──────────────────────────────────────────────────────────────────
+      #
+      # Same stateset contract as the four collectors above, one series per
+      # known power supply state, exactly one at 1. {{ $labels.location }} names
+      # the supply (powerSupply_F1PSa) in the library's own spelling, so the
+      # value pastes straight into the GUI.
+      #
+      # Supplies are installed as a redundant pair per frame and R1.11.2 is
+      # explicit that a single one is adequate to power its frame. So neither
+      # rule below is a service-down alert: both say "redundancy is gone, the
+      # next failure in this frame takes the frame with it". That is exactly why
+      # they are worth paging on — nothing else in the library reports a dead
+      # supply, and the loss stays invisible until the survivor also goes.
+      #
+      # 15m rather than the 30m/1h used above, and it is a DEFAULT rather than a
+      # measured threshold: the legacy RoS scripts in samples/legacy/ never
+      # collected this endpoint at all, so nobody here has data on how long a
+      # supply legitimately sits outside `online`. 15m is short because, unlike
+      # a drive restart or a firmware update, there is no routine operation that
+      # takes a power supply offline for tens of minutes and then returns it.
+      #
+      # The two rules deliberately OVERLAP: a failed supply satisfies both. This
+      # is the same shape AccessorNotFullyAvailable already uses above — the
+      # narrow rule names the actionable fault, and the broad one is the safety
+      # net for every state not in it, including any state R1.11.2 does not
+      # tabulate. The manual's tables are demonstrably a floor rather than a
+      # ceiling, and the collector emits an undocumented state as its own series
+      # precisely so a rule can still see it.
+      - alert: PowerSupplyNotOnline
+        expr: tapelibrary_power_supply_state{state="online"} == 0
+        for: 15m
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter power supply {{ $labels.location }} on library {{ $labels.library }} is not online'
+          description: 'Power supply {{ $labels.location }} on {{ $labels.library }} has not reported state online for 15 minutes. Its frame is running on a single supply: the pair exists for redundancy, so the frame stays up, but the next failure in that frame will not be survivable. This rule is the safety net and fires on unknown (which R1.11.2 attributes to an unreachable LCC node card rather than to the supply itself) and on any state the manual does not tabulate; a confirmed failure additionally raises PowerSupplyFailed at critical.'
+
+      - alert: PowerSupplyFailed
+        expr: tapelibrary_power_supply_state{state="failed"} == 1
+        for: 15m
+        labels:
+          severity: critical
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter power supply {{ $labels.location }} on library {{ $labels.library }} has failed'
+          description: 'Power supply {{ $labels.location }} on {{ $labels.library }} has reported state failed for 15 minutes. R1.11.2: verify the supply is plugged in and cabled correctly from the rear of the frame, and contact IBM Support if the fault persists. Its frame now has no power redundancy left.'
+
+      # ──────────────────────────────────────────────────────────────────
+      # Business: NodeCardsCollector (added via /add-collector)
+      # ──────────────────────────────────────────────────────────────────
+      #
+      # Same stateset contract as the five collectors above, one series per
+      # known node card state, exactly one at 1. Two labels identify the card
+      # here, not one: {{ $labels.location }} names the hardware it sits in
+      # (frame_F1, accessor_Aa) and {{ $labels.card_type }} says which of that
+      # hardware's cards it is, because an accessor carries an MDA and an ACC
+      # card at the same location. A rule that dropped card_type would silently
+      # merge two different cards.
+      #
+      # These are the library's controller cards, so a fault here is usually
+      # the CAUSE of symptoms other collectors are already reporting: R1.11.2
+      # attributes a power supply reading `unknown` to an unreachable LCC
+      # rather than to the supply. When NodeCardDegraded fires alongside
+      # PowerSupplyNotOnline, this is the one to work first.
+      #
+      # 30m, and the selector is ported verbatim from the classification
+      # recorded in docs/exporter-journal.md. `unknown` is deliberately NOT in
+      # it, for the same reason it is unclassified on library, frames, drives
+      # and power_supplies: two cards in the 2026-07-28 capture sit at
+      # `unknown` on a healthy library, so paging on it would page on the
+      # normal case. Note also that the healthy value is `online`, not
+      # `normal` — the legacy scripts expect `normal`, R1.11.2 documents
+      # `online`, and a card reporting `normal` would surface as its own
+      # undocumented-state series rather than matching anything here.
+      - alert: NodeCardDegraded
+        expr: tapelibrary_node_card_state{state=~"inServiceMode|unreachable|noEthernet|noCAN"} == 1
+        for: 30m
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter node card {{ $labels.card_type }} at {{ $labels.location }} on library {{ $labels.library }} is degraded'
+          description: '{{ $labels.card_type }} node card at {{ $labels.location }} on {{ $labels.library }} has reported state {{ $labels.state }} for 30 minutes. noEthernet and noCAN mean the card is alive but has lost a communication path; unreachable means the library cannot talk to it at all. Check cabling first, then restart the card from the GUI. If other collectors on this library are also alerting, treat this as the likely root cause rather than a separate incident.'
+
+      # The critical tier is a fleet-level question rather than a per-card one,
+      # which is why it aggregates: an LCC losing the reporting role is normal
+      # during a failover (that is what the role is for), but NO LCC holding it
+      # means nothing is answering for the library.
+      #
+      # 15m rather than 30m because a failover completes in far less than that,
+      # so a gap this long is a stuck one rather than one in progress. Both
+      # numbers are re-derived DEFAULTS, not measured thresholds: the legacy
+      # scripts in samples/legacy/ never collected this endpoint, so nobody
+      # here has data on how long a real failover takes on this hardware.
+      # Revisit once the fleet has run long enough to show one.
+      #
+      # `== 0` cannot fire on a library whose series are missing entirely
+      # (max over no series returns no result, not 0), so an exporter that has
+      # never reached a library does not raise this. That case is already
+      # covered by the collector-health rules at the top of this file, and
+      # keeping the two separate is deliberate: "the LCC is gone" and "we
+      # cannot see the library" call for different first actions.
+      - alert: NodeCardNoReportingLCC
+        expr: max by (job,library) (tapelibrary_node_card_reporting_lcc) == 0
+        for: 15m
+        labels:
+          severity: critical
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter library {{ $labels.library }} has no reporting LCC'
+          description: 'No node card on {{ $labels.library }} has held the reporting LCC role for 15 minutes: every LCC reports reportingLCC=no. A failover moves this role in seconds, so a gap this long is a stuck or failed failover rather than one in progress, and the library has no controller answering for it. Check NodeCardDegraded on the same library for which card faulted, and contact IBM Support if no LCC recovers the role.'
+
+      # ──────────────────────────────────────────────────────────────────
+      # Business: IOStationsCollector (added via /add-collector)
+      # ──────────────────────────────────────────────────────────────────
+      #
+      # Same stateset contract as the six collectors above, one series per
+      # known I/O station state, exactly one at 1. {{ $labels.location }}
+      # names the station (ioStation_F2IOu) in the library's own spelling, so
+      # the value pastes straight into the GUI.
+      #
+      # EVERY RULE HERE IS A WARNING, and that is a deliberate departure from
+      # the pattern above rather than an omission. An I/O station is how media
+      # enters and leaves without pausing the library; nothing on this endpoint
+      # stops the library serving mounts. R1.11.2 defines no state here as a
+      # hard failure the way it defines powerSupplies `failed`, so a critical
+      # tier would page someone overnight for a job that waits until morning.
+      # The cost of a stuck station is real but deferred: imports and exports
+      # quietly not happening, which is why these rules exist at all — no other
+      # endpoint in the library reports it.
+      - alert: IOStationDegraded
+        expr: tapelibrary_io_station_state{state=~"closedNoMagazine|failedToClose|doorOpenTooLong|unknown"} == 1
+        for: 30m
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter I/O station {{ $labels.location }} on library {{ $labels.library }} is not normal'
+          description: 'I/O station {{ $labels.location }} on {{ $labels.library }} has reported state {{ $labels.state }} for 30 minutes. failedToClose and doorOpenTooLong both mean the door did not close — R1.11.2 gives the same user action for each, verify the magazine is fully inserted. closedNoMagazine means the station was closed empty and cannot accept an import. unknown means the library cannot read the station, and R1.11.2 attributes that to the associated LCC node card rather than to the station: check NodeCardDegraded on this library first. This rule is also the safety net for any state the manual does not tabulate, which the collector emits as its own series.'
+
+      # The planned candidate, verbatim from docs/exporter-journal.md: "warning
+      # if the door has been open for more than 1h". Expressed as the door gauge
+      # plus a 1h `for:`, which is the whole reason door.lastChanged is read by
+      # nothing — the same decision the frames collector already took for its
+      # three *LastChanged fields.
+      #
+      # 1h is a re-derived DEFAULT, not a measured threshold: the legacy RoS
+      # scripts in samples/legacy/ never collected this endpoint, so nobody here
+      # has data on how long an operator legitimately leaves a station open
+      # while loading a magazine. It is longer than the 30m above on purpose —
+      # loading media IS someone standing at the station with the door open, so
+      # a short window would page on the normal case.
+      #
+      # Note the overlap with IOStationDegraded's doorOpenTooLong: that state is
+      # the LIBRARY's own judgement that the door has been open too long, on a
+      # threshold set in the library rather than here. The two firing together
+      # is agreement, not duplication; this one firing alone means the library
+      # has not yet made up its mind.
+      - alert: IOStationDoorOpen
+        expr: tapelibrary_io_station_door_open == 1
+        for: 1h
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter I/O station {{ $labels.location }} door on library {{ $labels.library }} has been open for an hour'
+          description: 'The door of I/O station {{ $labels.location }} on {{ $labels.library }} has been open for 1 hour. While the door is open the library reports no magazine for this station, so its contents are invisible and no import or export can complete through it. Close the door once the magazine is loaded. If nobody is at the library, treat this as a door that failed to latch and check IOStationDegraded on the same station.'
+
+      # The second planned candidate, verbatim: "warning if the station has been
+      # full for more than 1h (exports are not being collected)".
+      #
+      # A full I/O station means the library has nowhere to put the next
+      # exported cartridge, so exports stop silently — the library does not
+      # fault, it simply queues. Comparing the two gauges rather than matching a
+      # hardcoded capacity is what makes this correct for both magazine sizes
+      # (18 for LTO, 16 for 3592) and for any future one: both series carry an
+      # identical label set, so the default all-labels vector matching joins
+      # them per station with no `on()` clause needed.
+      #
+      # `>=` rather than `==` on purpose: it also catches a response whose
+      # occupancy exceeds its own reported capacity, which the collector emits
+      # as reported rather than suppressing. A station that cannot describe
+      # itself coherently is worth looking at.
+      #
+      # Both metrics are absent while no magazine is inserted, so this rule
+      # cannot fire on an empty station — that case is IOStationDegraded's
+      # closedNoMagazine instead.
+      - alert: IOStationFull
+        expr: tapelibrary_io_station_slots_occupied >= tapelibrary_io_station_slots
+        for: 1h
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter I/O station {{ $labels.location }} on library {{ $labels.library }} is full'
+          description: 'Every slot in the magazine at I/O station {{ $labels.location }} on {{ $labels.library }} has been occupied for 1 hour. The library has nowhere to place the next exported cartridge, so exports through this station stop without faulting anything. Empty the magazine. If the station is full of cartridges nobody is collecting, check whether an export job completed and was never picked up.'
+
+      # Not on the planned candidate list: this follows from a field read off
+      # R1.11.2's own contract for contentsVolser, which returns the literal
+      # string `unknown` for a cartridge whose barcode the library could not
+      # read. Such a cartridge occupies a slot and cannot be imported, and no
+      # other collector in this exporter can see it.
+      #
+      # 1h matches the two rules above rather than being independently derived:
+      # a barcode is either readable or it is not, so the window is here only to
+      # let a cartridge mid-move settle, not to measure persistence.
+      - alert: IOStationUnreadableCartridge
+        expr: tapelibrary_io_station_slots_unreadable > 0
+        for: 1h
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter I/O station {{ $labels.location }} on library {{ $labels.library }} holds a cartridge with an unreadable barcode'
+          description: '{{ $value }} cartridge(s) in the magazine at I/O station {{ $labels.location }} on {{ $labels.library }} have a barcode the library could not read. They occupy slots and cannot be imported until someone reseats or replaces the label. A dirty, damaged or missing label is the usual cause; a scanner fault would show up on several stations at once and as AccessorDegraded with scannerFailed.'
+
+      # ──────────────────────────────────────────────────────────────────
+      # Business: FCPortsCollector (added via /add-collector)
+      # ──────────────────────────────────────────────────────────────────
+      #
+      # Same stateset contract as the seven collectors above, one series per
+      # known FC port state, exactly one at 1. {{ $labels.location }} names the
+      # port (fcPort_F1C4R1P0) in the library's own spelling, and
+      # {{ $labels.drive_location }} the drive it is installed on, so both
+      # paste straight into the GUI.
+      #
+      # BOTH RULES ARE WARNINGS, for a different reason than the I/O station
+      # rules above. A dark FC port is not deferrable the way an uncollected
+      # export is — it removes a drive from a host's view — but every TS4500
+      # drive here carries two ports, so a single dark port is the redundancy
+      # doing its job. What would deserve a critical tier is BOTH ports of one
+      # drive going dark at once, and that rule is deliberately not written
+      # yet: see docs/exporter-journal.md, "Open questions / assumptions".
+      # Nobody here has established whether this fleet cables both ports of a
+      # drive to separate fabrics (in which case both dark means a drive-side
+      # or drive-power fault) or leaves the second port unused (in which case
+      # it is dark permanently and the rule would page on the normal case).
+      # The capture cannot settle it: 37 of its 80 ports are dark, which is far
+      # too many to be faults and strongly suggests the second reading, but
+      # "strongly suggests" is not the same as knowing the cabling.
+
+      # The planned candidate, verbatim from docs/exporter-journal.md: "warning
+      # if a port whose drive is online sits at state=noLightDetected for 15m".
+      #
+      # The join is the whole point of this rule and the reason drive_location
+      # rides on the stateset rather than on _info. A dark port on a drive that
+      # is in service mode, cleaning or being updated is expected — someone
+      # unplugged it, or the drive is down on purpose. A dark port on a drive
+      # the library reports as online is a cable, SFP, or fabric fault, and
+      # nothing on /v1/drives can see it: the drive keeps reporting perfectly
+      # healthy while its host loses the path to it.
+      #
+      # label_replace rewrites this collector's drive_location into location so
+      # the two sides share a join key; it is applied to the FC side rather
+      # than the drives side so the resulting series keeps the port's own
+      # labels for the annotations below.
+      #
+      # 15m is the planned window and a re-derived DEFAULT, not a measured
+      # threshold: the legacy RoS scripts in samples/legacy/ never collected
+      # this endpoint. It is shorter than the 30m/1h used elsewhere because a
+      # link either negotiates or it does not — there is no routine operation
+      # that leaves a port on an online drive dark for a quarter of an hour.
+      - alert: FCPortNoLight
+        expr: |
+          label_replace(
+            tapelibrary_fc_port_state{state="noLightDetected"} == 1,
+            "location", "$1", "drive_location", "(.*)"
+          )
+          and on (job, library, location)
+          (tapelibrary_drive_state{state="online"} == 1)
+        for: 15m
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter Fibre Channel port on drive {{ $labels.location }} of library {{ $labels.library }} detects no light'
+          description: 'A Fibre Channel port on drive {{ $labels.location }} of {{ $labels.library }} has detected no light for 15 minutes while the drive itself reports online. No device is connected on that link: check the cable, the SFP at both ends, and the SAN switch port. The drive will keep reporting healthy on /v1/drives throughout, and any host reaching it only through this path has already lost it. If the drive is deliberately single-attached, this port is dark permanently and the rule should be silenced for it rather than left firing.'
+
+      # The second planned candidate: "warning if negotiated speed drops below
+      # the port's configured setting". That expression is UNDEFINED on this
+      # fleet — speedSetting is `auto` on 79 of the capture's 80 ports, so
+      # there is no configured rate to fall below — and it ships in the only
+      # form that is defined for an auto-negotiating port: below what this
+      # library's own ports actually achieve.
+      #
+      # Self-calibrating rather than thresholded on a literal, which is the
+      # house style established by LogicalLibraryDrivesBelowFloor's ratio and
+      # AccessorNotFullyAvailable's sum < count. A hardcoded `< 2e9` would be
+      # an invented threshold, would fire forever on the one port deliberately
+      # pinned to 8Gbps, and would be wrong the day a 32GFC drive lands.
+      #
+      # The group_left against _info restricts this to ports whose setting is
+      # `auto`. Without it the rule fires permanently on the pinned port, which
+      # is running at exactly the rate someone configured. This is the same
+      # join shape ControlPathRedundancyLost already uses, and for the same
+      # reason: the discriminating value is an identity string on _info.
+      #
+      # Dark ports drop out for free — they emit no speed series at all — so
+      # this rule reads only ports that actually negotiated something, which is
+      # what makes it a renegotiation signal rather than a second link-down one.
+      - alert: FCPortSpeedBelowPeers
+        expr: |
+          (
+            tapelibrary_fc_port_speed_bytes_per_second
+            * on (job, library, location) group_left ()
+              tapelibrary_fc_port_info{speed_setting="auto"}
+          )
+          < on (job, library) group_left ()
+            max by (job, library) (tapelibrary_fc_port_speed_bytes_per_second)
+        for: 30m
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter Fibre Channel port {{ $labels.location }} on library {{ $labels.library }} negotiated below its peers'
+          description: 'Port {{ $labels.location }} on drive {{ $labels.drive_location }} of {{ $labels.library }} negotiated {{ $value }} bytes/s, below the fastest rate any auto-negotiating port on this library reached. The port is set to auto, so this is the fabric agreeing on a slower rate rather than a configuration choice: a marginal cable or SFP, a dirty connector, or a switch port pinned to a lower speed. Drives on this path will still work and will simply be slower, so this is a degradation to schedule rather than an outage. Note the value is a nominal signalling rate, not payload throughput.'
+
+      # ──────────────────────────────────────────────────────────────────
+      # Business: LogicalLibrariesCollector (added via /add-collector)
+      # ──────────────────────────────────────────────────────────────────
+      #
+      # A logical library is what a backup application actually mounts, and
+      # its virtual slot count is the promise the physical library made to
+      # that application. R1.11.2 will not let that count fall below the
+      # partition's assigned cartridges, so the quotient below is a real
+      # saturation ratio bounded at 1 rather than an arbitrary division. At 1
+      # the partition refuses further imports WHILE THE PHYSICAL LIBRARY STILL
+      # REPORTS THOUSANDS OF FREE SLOTS — which is precisely why no other
+      # collector here can raise this: SlotsCollector counts the physical
+      # library and DrivesCollector knows only which partition a drive is in.
+      #
+      # A bare division rather than an explicit `on (...)`: both series come
+      # from the same collector on the same instance and therefore carry an
+      # identical label set, so the result keeps `instance`, `library`, `model`
+      # and `logical_library` for the annotations below, which an `on()` clause
+      # would strip. TestLogicalLibrariesCollector_SaturationIsComputable pins
+      # that precondition, because an extra label on either side would make the
+      # division match nothing and this rule would silently never fire.
+      #
+      # THE THRESHOLDS ARE RE-DERIVED DEFAULTS, NOT MEASURED ONES, AND THEY ARE
+      # DELIBERATELY HIGHER THAN THEY LOOK. The 2026-07-28 capture already sits
+      # at 0.964 (4819/5000) and 0.971 (4853/5000) on this fleet's two
+      # partitions, so the round-number 0.90/0.95 pair this repository uses
+      # elsewhere would page on both of them from the moment it loaded — the
+      # trap LogicalLibraryDrivesBelowFloor's ratio and FCPortSpeedBelowPeers'
+      # peer comparison were both written to avoid. A tape library runs full;
+      # 97% is its normal working state, not an incident. 0.98 leaves ~100 free
+      # slots per partition here and 0.99 leaves ~50, both of which are small
+      # enough that an operator has to act and large enough that the fleet's
+      # steady state does not trip them. Adjust per deployment: a site whose
+      # partitions are sized well above their cartridge count wants these
+      # lower, and the whole point of the ratio is that neither figure has to
+      # be restated as an absolute slot count.
+      - alert: LogicalLibraryNearlyFull
+        expr: |
+          tapelibrary_logical_library_cartridges
+          / tapelibrary_logical_library_virtual_slots
+          > 0.98
+        for: 1h
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter logical library {{ $labels.logical_library }} on {{ $labels.library }} is nearly full'
+          description: '{{ $labels.instance }}: logical library {{ $labels.logical_library }} on {{ $labels.library }} has been at {{ $value }} of its virtual slot capacity for 1 hour (threshold: 0.98). The partition stops accepting imports when this reaches 1, regardless of how many free slots the physical library still reports, so a backup application mounting this partition will start failing its imports rather than merely slowing down. Either eject cartridges from this partition or raise its virtual slot count, which the library permits up to its own totalCapacity.'
+
+      - alert: LogicalLibraryNearlyFull
+        expr: |
+          tapelibrary_logical_library_cartridges
+          / tapelibrary_logical_library_virtual_slots
+          > 0.99
+        for: 1h
+        labels:
+          severity: critical
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter logical library {{ $labels.logical_library }} on {{ $labels.library }} is about to refuse imports'
+          description: '{{ $labels.instance }}: logical library {{ $labels.logical_library }} on {{ $labels.library }} has been at {{ $value }} of its virtual slot capacity for 1 hour (threshold: 0.99). Fewer than one percent of the partition''s virtual slots remain, so imports will begin failing shortly and the physical library''s own free-slot count will not warn anybody — it is not the constraint. Eject cartridges from this partition or raise its virtual slot count now.'
+
+      # ──────────────────────────────────────────────────────────────────
+      # Business: CleaningCartridgesCollector (added via /add-collector)
+      # ──────────────────────────────────────────────────────────────────
+      # The 100 and 30 thresholds below are the only MEASURED thresholds in
+      # this file. Every other one is a re-derived default; these two are
+      # carried across verbatim from the legacy check scripts under
+      # samples/legacy/, which alerted on exactly this quantity for years.
+      # Adjust per deployment all the same: they encode this site's cleaning
+      # policy and drive count, not a property of the TS4500.
+      #
+      # No sum() here, unlike the legacy rule. The collector emits the
+      # library-wide total itself, unconditionally, so this rule keeps
+      # working with --collector.cleaning_cartridges.per-volser=false — a
+      # sum() over the per-cartridge series would silently match nothing
+      # the moment a site flipped that flag to cut cardinality.
+      - alert: CleaningCartridgesLow
+        expr: tapelibrary_cleaning_cartridges_cleans_remaining < 100
+        for: 1h
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter library {{ $labels.library }} is running low on cleaning capacity'
+          description: '{{ $labels.instance }}: library {{ $labels.library }} has had only {{ $value }} clean operations left across all of its cleaning cartridges for 1 hour (threshold: 100). A drive that cannot be cleaned degrades and eventually fails, and the library gives no other warning. Order replacement cleaning cartridges now; query tapelibrary_cleaning_cartridge_cleans_remaining to see which ones are spent.'
+
+      - alert: CleaningCartridgesLow
+        expr: tapelibrary_cleaning_cartridges_cleans_remaining < 30
+        for: 1h
+        labels:
+          severity: critical
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter library {{ $labels.library }} is nearly out of cleaning capacity'
+          description: '{{ $labels.instance }}: library {{ $labels.library }} has had only {{ $value }} clean operations left across all of its cleaning cartridges for 1 hour (threshold: 30). At this level the library will stop being able to clean its drives within days, and an uncleaned drive degrades silently until it fails a mount. Replace cleaning cartridges now.'
+
+      # Severity is critical, where docs/exporter-journal.md planned warning.
+      # The plan predates this metric: zero USABLE cartridges is strictly
+      # worse than the < 30 total above, since it means the library cannot
+      # clean a drive at all right now, and paging the strictly-worse
+      # condition at the lower severity would invert the pair.
+      #
+      # This is not the state="normal" count. A cartridge with no cleans
+      # left, one queued for export and one mid-import are all still
+      # reported by the library and still counted in their state, and the
+      # robot will select none of them.
+      - alert: CleaningCartridgesExhausted
+        expr: tapelibrary_cleaning_cartridges_usable == 0
+        for: 1h
+        labels:
+          severity: critical
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter library {{ $labels.library }} has no usable cleaning cartridge'
+          description: '{{ $labels.instance }}: library {{ $labels.library }} has had zero usable cleaning cartridges for 1 hour — none that is both in the normal state and has at least one clean left. Drives needing a clean will not get one, and will degrade until they start failing mounts. Note that tapelibrary_cleaning_cartridges{state="normal"} may still be non-zero: a spent cartridge is still reported, still occupies a slot, and cannot clean anything.'
+
+      # ──────────────────────────────────────────────────────────────────
+      # Business: DataCartridgesCollector (added via /add-collector)
+      # ──────────────────────────────────────────────────────────────────
+      # docs/exporter-journal.md planned "any cartridge count in a
+      # non-normal state". The selector below is deliberately NARROWER than
+      # that, and the difference is the point: exportQueued, importing and
+      # verifying are all states a perfectly healthy cartridge passes
+      # through during ordinary work, so state!="normal" would page on every
+      # import the operators ran. The five states listed are the ones a
+      # cartridge does not leave on its own.
+      #
+      # Kept per logical_library rather than summed across the machine: the
+      # remedy is a migration inside one partition, and naming it in the
+      # alert saves the responder a query. The thresholds are re-derived
+      # defaults, not measured ones — unlike the cleaning-cartridge pair
+      # above — so tune them to the size of your parc: 5 degraded cartridges
+      # matter more in a 500-cartridge partition than in a 9 749-cartridge
+      # one.
+      - alert: DataCartridgesDegraded
+        expr: sum by (job, library, logical_library) (tapelibrary_data_cartridges{state=~"failedVerification|atEndOfLife|uncertainBarcode|assignmentRequired|unknown"}) > 5
+        for: 1h
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter logical library {{ $labels.logical_library }} on {{ $labels.library }} is holding degraded cartridges'
+          description: '{{ $labels.instance }}: logical library {{ $labels.logical_library }} on {{ $labels.library }} has had {{ $value }} cartridges in a degraded state for 1 hour (threshold: 5). These are cartridges that failed verification, reached end of life, carry an uncertain barcode, need assignment, or that the library cannot describe at all — none of which resolves without an operator. Break the count down with tapelibrary_data_cartridges to see which state, then enable --collector.data_cartridges.per-volser temporarily to name the cartridges.'
+
+      - alert: DataCartridgesDegraded
+        expr: sum by (job, library, logical_library) (tapelibrary_data_cartridges{state=~"failedVerification|atEndOfLife|uncertainBarcode|assignmentRequired|unknown"}) > 50
+        for: 1h
+        labels:
+          severity: critical
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter logical library {{ $labels.logical_library }} on {{ $labels.library }} is losing usable media'
+          description: '{{ $labels.instance }}: logical library {{ $labels.logical_library }} on {{ $labels.library }} has had {{ $value }} cartridges in a degraded state for 1 hour (threshold: 50). At this scale it is a systemic cause rather than individual media failures — a drive writing bad tapes, or a partition whose import/export element addresses have run out — and the data on those cartridges is at risk. Investigate the shared cause before migrating.'
+
+      # Reads the histogram's cumulative le="0.2" bucket: cartridges with
+      # 20% or less of their media life left. Cartridges the library reports
+      # no reading for are NOT in this bucket — they are counted in
+      # tapelibrary_data_cartridges_lifetime_unknown, and on the 2026-07-28
+      # capture that is 45% of the parc. That is deliberate: R1.11.2 defines
+      # 0% as "at risk of data loss", so treating a missing reading as 0
+      # would page on nearly half the library.
+      #
+      # Not per logical_library: the histogram is library-wide, since a
+      # per-partition histogram would have cost one full bucket set per
+      # partition to answer a question about media procurement, which is a
+      # library-level decision.
+      - alert: DataCartridgesWearingOut
+        expr: tapelibrary_data_cartridges_lifetime_remaining_ratio_bucket{le="0.2"} > 100
+        for: 1h
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter library {{ $labels.library }} is accumulating worn cartridges'
+          description: '{{ $labels.instance }}: library {{ $labels.library }} has had {{ $value }} cartridges at 20% or less of remaining media life for 1 hour (threshold: 100). These will reach end of life together and their data has to be migrated before they do. Plan replacement media now; tapelibrary_data_cartridges_lifetime_remaining_ratio_bucket{le="0"} is the count already at end of life.'
+
+      - alert: DataCartridgesWearingOut
+        expr: tapelibrary_data_cartridges_lifetime_remaining_ratio_bucket{le="0.2"} > 500
+        for: 1h
+        labels:
+          severity: critical
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter library {{ $labels.library }} faces a media replacement cliff'
+          description: '{{ $labels.instance }}: library {{ $labels.library }} has had {{ $value }} cartridges at 20% or less of remaining media life for 1 hour (threshold: 500). A cohort this size bought together will expire together, and migrating it after the fact takes longer than the media has left. Procure replacement cartridges and start migrating the oldest now. Note this counts only cartridges the library has a reading for — compare against tapelibrary_data_cartridges_lifetime_unknown, which on unmounted media can be a large share of the parc.'
+
+      # ──────────────────────────────────────────────────────────────────
+      # Business: SlotsCollector (added via /add-collector)
+      # ──────────────────────────────────────────────────────────────────
+      # Free capacity the robot may actually target, as a ratio rather than
+      # an absolute floor.
+      #
+      # This is deliberately NOT a second "the library is full" rule.
+      # LibraryCapacityThresholdExceeded above already reads the library's
+      # own used/licensed ratio against the threshold the library itself
+      # publishes, and on the 2026-07-28 capture that is already 99.03%
+      # against a capacityUtilThresh of 99. What this rule adds is the one
+      # thing that endpoint cannot say: R1.11.2 defines inServiceMode as a
+      # state in which a slot "cannot be selected as a cartridge
+      # destination", so a free position inside one is capacity the robot
+      # may not use. tapelibrary_slots_positions_available counts only the
+      # free positions in normal slots.
+      #
+      # A ratio, not a literal, for the reason LogicalLibraryDrivesBelowFloor
+      # and FCPortSpeedBelowPeers already give: a tape library runs full, and
+      # an absolute floor would be a number nobody here has measured. 2% and
+      # 1% are round-number re-derived defaults — on a 10 732-position
+      # library they are roughly 215 and 107 free positions — and should be
+      # confirmed against how fast this fleet's slots actually fill.
+      #
+      # Watch this alongside tapelibrary_slots{state="inServiceMode"}: a
+      # library that was comfortable yesterday and is not today, with no
+      # imports in between, has had slots taken out of service rather than
+      # filled.
+      #
+      # Aggregated with `sum by (job, library)`, so `instance` does not
+      # survive into the annotations — the same shape (and the same omission)
+      # as AccessorNotFullyAvailable above. `library` is what names the
+      # machine on this target model anyway.
+      - alert: SlotsNearlyFull
+        expr: >
+          sum by (job, library) (tapelibrary_slots_positions_available)
+            / sum by (job, library) (tapelibrary_slots_positions)
+            < 0.02
+        for: 1h
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter library {{ $labels.library }} is running out of usable slots'
+          description: 'Library {{ $labels.library }} has had only {{ $value | humanizePercentage }} of its cartridge positions both empty and in a slot the robot may target, for 1 hour (threshold: 2%). A library with nowhere to put a cartridge cannot accept an import and will start failing host move requests. Check tapelibrary_slots_positions_available for the absolute count and tapelibrary_slots{state="inServiceMode"} for whether slots have been taken out of service rather than filled.'
+
+      - alert: SlotsNearlyFull
+        expr: >
+          sum by (job, library) (tapelibrary_slots_positions_available)
+            / sum by (job, library) (tapelibrary_slots_positions)
+            < 0.01
+        for: 1h
+        labels:
+          severity: critical
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter library {{ $labels.library }} has almost no usable slots left'
+          description: 'Library {{ $labels.library }} has had under {{ $value | humanizePercentage }} of its cartridge positions available for 1 hour (threshold: 1%). At this point the accessor has almost no room to shuffle high-density tiers, which degrades every mount and not only imports. Export media or bring service-mode slots back online now.'
+
+      # Put retries against puts: the one threshold in this file that is
+      # bounded by an observation rather than chosen. putRetries is 0 on all
+      # 79 slots of the 2026-07-28 capture against 25 023 lifetime puts, so
+      # the healthy value of this ratio is not "low", it is zero. 1% is the
+      # margin above that, not an estimate of normal wear.
+      #
+      # A ratio rather than a bare rate because put volume varies by orders
+      # of magnitude between a quiet library and one mid-migration, and a
+      # rate threshold that suits one would be wrong for the other. When no
+      # puts are happening the division is NaN and the rule cannot fire,
+      # which is the correct behaviour for an idle library.
+      #
+      # This is the earliest robotics-degradation signal the API offers: a
+      # gripper that misses and retries is one that will eventually fail to
+      # place a cartridge at all, and nothing on /v1/accessors shows it this
+      # early.
+      # Unaggregated, unlike SlotsNearlyFull above: both sides carry an
+      # identical label set, so the division keeps instance/library/model for
+      # the annotations rather than stripping them.
+      - alert: SlotPutRetryRateHigh
+        expr: >
+          rate(tapelibrary_slots_put_retries_total[1h])
+            / rate(tapelibrary_slots_puts_total[1h])
+            > 0.01
+        for: 1h
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter library {{ $labels.library }} is retrying cartridge puts'
+          description: '{{ $labels.instance }}: library {{ $labels.library }} has needed a retry on {{ $value | humanizePercentage }} of its cartridge puts for 1 hour (threshold: 1%). The reference capture shows zero put retries across 25 023 lifetime puts, so any sustained rate here is robotics degradation rather than normal wear. Enable --collector.slots.per-slot to find which slots are missing: retries clustered in one frame or column point at a rail or a calibration problem, retries spread evenly point at the gripper.'
+
+      # No denominator exists on this side. /v1/slots reports getRetries but
+      # no matching gets counter, so unlike the put rule above this one
+      # cannot be a ratio and its threshold is a re-derived default rather
+      # than an observed bound — see docs/exporter-journal.md, which records
+      # the missing counter as an open question.
+      #
+      # 0.01/s is roughly 36 get-retries an hour library-wide. The capture's
+      # 79 slots carry 78 get-retries between them over the whole lifetime of
+      # the library, so an hour that produces half that number again is
+      # plainly abnormal even without knowing the get volume. Warning only:
+      # without a denominator this cannot distinguish a degrading gripper
+      # from an unusually busy hour, so it is a signal to look rather than a
+      # page.
+      - alert: SlotGetRetryRateHigh
+        expr: rate(tapelibrary_slots_get_retries_total[1h]) > 0.01
+        for: 1h
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter library {{ $labels.library }} is retrying cartridge gets'
+          description: '{{ $labels.instance }}: library {{ $labels.library }} has been accumulating {{ $value }} get-retries per second for 1 hour (threshold: 0.01/s, about 36 an hour). This endpoint reports no gets counter, so this is an absolute rate rather than a ratio and a busy migration can raise it legitimately: correlate with tapelibrary_accessor_gets_total before treating it as a fault. Enable --collector.slots.per-slot to see whether the retries cluster in one frame.'
+
+      # ──────────────────────────────────────────────────────────────────
+      # Business: EventsCollector (added via /add-collector)
+      # ──────────────────────────────────────────────────────────────────
+      # These two read a TRAILING WINDOW, not a counter. tapelibrary_events
+      # counts what the library raised in the last
+      # --collector.events.lookback (1h by default) and falls back to zero
+      # once those events age out, so `> 0` means "raised recently" and the
+      # rule resolves on its own without anything being acknowledged. Do not
+      # wrap either expression in rate() or increase().
+      #
+      # The severity matcher is an exact equality on purpose, never a regex.
+      # R1.11.2 documents five severities, and two of them —
+      # inactiveError and inactiveWarning — mean the condition has been
+      # RESOLVED. A `severity=~".*[eE]rror"` would sweep those in and page on
+      # errors that are already fixed.
+      #
+      # `for` is deliberately short on both. Unlike every hardware rule above,
+      # which waits out a transient state, an event is a point in time that the
+      # library has already decided is worth recording: waiting 30m to report
+      # it only delays the operator without filtering anything, because the
+      # value stays put for a whole lookback window regardless.
+      - alert: LibraryEventWarning
+        expr: tapelibrary_events{severity="warning"} > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter library {{ $labels.library }} raised a warning event'
+          description: '{{ $labels.instance }}: library {{ $labels.library }} has raised {{ $value }} warning event(s) within the collector lookback window. Read them with GET /v1/events on the library, or in the GUI event log; tapelibrary_events_last_seen_timestamp_seconds{severity="warning"} gives the time of the most recent one. A warning that has since been resolved moves to severity="inactiveWarning" and stops matching here on its own.'
+
+      - alert: LibraryEventError
+        expr: tapelibrary_events{severity="error"} > 0
+        for: 5m
+        labels:
+          severity: critical
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter library {{ $labels.library }} raised an error event'
+          description: '{{ $labels.instance }}: library {{ $labels.library }} has raised {{ $value }} error event(s) within the collector lookback window. Every error event carries a fix procedure: GET /v1/events on the library to find the event ID, then GET /v1/events/<ID>/fixProcedure. tapelibrary_events_last_seen_timestamp_seconds{severity="error"} gives the time of the most recent one. An error that has since been resolved moves to severity="inactiveError" and stops matching here on its own.'
+
+      # No rule ships on tapelibrary_events{severity="information"}. The
+      # 2026-07-28 capture is 42 information events in 3h45m, every one of them
+      # a login or logout, and this exporter authenticates on each request —
+      # so that series counts the monitoring traffic as much as anything an
+      # operator did, and no threshold over it would mean anything. It is
+      # emitted because the severity breakdown must sum to the events
+      # returned, not because it is alertable.
+      #
+      # No rule ships on tapelibrary_events_by_code either. It is empty unless
+      # an operator names codes in --collector.events.error-codes, and which
+      # codes are worth paging on is a per-fleet decision: nothing in R1.11.2
+      # enumerates them, and no error-severity event has yet been observed on
+      # this fleet to derive a default from. Add a rule alongside the flag.
+
+      # ──────────────────────────────────────────────────────────────────
+      # Business: DataCartridgesLifetimeCollector (added via /add-collector)
+      # ──────────────────────────────────────────────────────────────────
+      #
+      # A DELTA, not a level, and that is the whole design of this rule.
+      # Roughly 40% of the cartridges in the 2026-07-28 capture already carry
+      # at least one uncorrected error (17 of 41 on the read side, 15 on the
+      # write side), which is normal for media that has been in service for
+      # years: a threshold on the level would fire on day one and stay firing.
+      # What matters is a cartridge that did NOT have uncorrected errors
+      # starting to have them, because uncorrected means the library could not
+      # reconstruct the data and the loss is already silent.
+      #
+      # The expression is "how many cartridges carry at least one uncorrected
+      # error of this direction", which is the histogram's _count minus its
+      # le="0" bucket — the reason that bucket bound exists. delta() is applied
+      # to each side rather than to the difference because PromQL cannot take a
+      # range vector of an expression; delta is linear, so
+      # delta(a) - delta(b) == delta(a - b), and no recording rule is needed.
+      #
+      # `ignoring(le)` is required: the _bucket series carries a le label the
+      # _count series does not, so the vectors would not match without it.
+      #
+      # 6h is the window because the collector refreshes every 15m (24 samples)
+      # and cartridge memory is only updated when a cartridge is unmounted: a
+      # shorter window would mostly measure which cartridges happened to be
+      # mounted, not which ones are degrading.
+      #
+      # The thresholds are round-number DEFAULTS, deliberately, and should be
+      # calibrated per deployment once a few weeks of this metric exist —
+      # nothing in R1.11.2 grounds them and the legacy scripts never collected
+      # this endpoint. On a ~9 750-cartridge library, 5 newly-affected
+      # cartridges in 6h is a rate worth a look; 25 suggests a drive chewing
+      # media rather than the cartridges wearing out, which is the case where
+      # the fastest useful next step is to join
+      # tapelibrary_data_cartridge_usage_errors_total (turn on
+      # --collector.data_cartridges_lifetime.per-volser) against
+      # tapelibrary_data_cartridge_info to see whether the affected cartridges
+      # share a recent drive.
+      - alert: DataCartridgeUncorrectedErrorsRising
+        expr: |
+          delta(tapelibrary_data_cartridges_usage_errors_count{correction="uncorrected"}[6h])
+            - ignoring(le)
+          delta(tapelibrary_data_cartridges_usage_errors_bucket{correction="uncorrected",le="0"}[6h])
+            > 5
+        for: 10m
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter library {{ $labels.library }} has more cartridges taking uncorrected {{ $labels.direction }} errors'
+          description: '{{ $labels.instance }}: library {{ $labels.library }} has gained {{ $value }} data cartridge(s) with at least one uncorrected {{ $labels.direction }} error over the last 6h (threshold: 5). Uncorrected means the library could not reconstruct the data, so the loss is already silent. Set --collector.data_cartridges_lifetime.per-volser to name the cartridges, then join tapelibrary_data_cartridge_usage_errors_total against tapelibrary_data_cartridge_info on volser to check whether they share a drive.'
+
+      - alert: DataCartridgeUncorrectedErrorsRising
+        expr: |
+          delta(tapelibrary_data_cartridges_usage_errors_count{correction="uncorrected"}[6h])
+            - ignoring(le)
+          delta(tapelibrary_data_cartridges_usage_errors_bucket{correction="uncorrected",le="0"}[6h])
+            > 25
+        for: 10m
+        labels:
+          severity: critical
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter library {{ $labels.library }} is losing data cartridges to uncorrected {{ $labels.direction }} errors'
+          description: '{{ $labels.instance }}: library {{ $labels.library }} has gained {{ $value }} data cartridge(s) with at least one uncorrected {{ $labels.direction }} error over the last 6h (threshold: 25). At this rate the cause is more likely a drive damaging media than the media wearing out. Set --collector.data_cartridges_lifetime.per-volser and join tapelibrary_data_cartridge_usage_errors_total against tapelibrary_data_cartridge_info on volser: if the affected cartridges share a recent drive, take that drive out of service before it damages more.'
+
+      # No rule ships on tapelibrary_data_cartridges_usage_unknown, in either
+      # of its two reasons, and both omissions are deliberate.
+      # reason="unread" is 39% of the reference capture and is the endpoint's
+      # ordinary shape — the library simply has not read those cartridges'
+      # memory — so any threshold over it would page on normality.
+      # reason="invalid" IS a genuine data-quality signal (the capture holds
+      # one cartridge reporting a negative motionMeters), but a single corrupt
+      # cartridge-memory read is not an operational event, and no grounded
+      # threshold exists for how many would be: watch it on a dashboard and
+      # add a rule once this fleet's baseline is known.
+      #
+      # Nothing ships on the corrected-error families either. Correction is the
+      # media working as designed, and a corrected-error rate that matters is
+      # one that predicts uncorrected errors — a relationship nothing on this
+      # fleet has measured yet.
+
+      # ──────────────────────────────────────────────────────────────────
+      # Business: ReportsLibraryCollector (added via /add-collector)
+      # ──────────────────────────────────────────────────────────────────
+      #
+      # Every metric this collector emits describes ONE already-closed hourly
+      # window, republished unchanged until the library closes the next one.
+      # Two consequences shape every rule below.
+      #
+      # First, `for:` is measured in whole windows, not in minutes. A value
+      # cannot change between windows, so a `for: 10m` buys nothing that
+      # `for: 0` does not; the durations here are chosen to require several
+      # consecutive windows to agree.
+      #
+      # Second, a library that stops publishing windows keeps serving its last
+      # one at full freshness — tapelibrary_library_report_last_refresh_
+      # timestamp_seconds stays current, because the refresh really is
+      # succeeding. Only the window timestamp ages, which is why
+      # LibraryReportWindowStale exists and why it is listed first: if it is
+      # firing, treat every other rule in this block as unproven rather than
+      # as reassuring.
+      - alert: LibraryReportWindowStale
+        expr: time() - tapelibrary_library_report_window_timestamp_seconds > 10800
+        for: 0m
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter library {{ $labels.library }} has published no activity report for 3 hours'
+          description: 'Library {{ $labels.library }} last stamped an hourly activity report {{ $value | humanizeDuration }} ago. R1.11.2 publishes one per completed hour, so three missed windows means the reporting path has stopped, not that the library is idle. Every other tapelibrary_library_report_* series is still serving that stale window at face value: do not read them as current until this clears.'
+
+      # Mounts are the library's reason to exist, and a window recording none
+      # is the shape a stopped host-side workload takes here. 6h is a
+      # deliberately blunt default: the reference capture shows 29-39 mounts
+      # in every hour it covers, but nobody has measured what this fleet does
+      # overnight, at weekends, or during a maintenance freeze, and a library
+      # that is legitimately idle must not page. Tune the duration to the
+      # quietest stretch a given site actually expects before wiring this to
+      # a notification — it is the one threshold in this block with no
+      # grounding in R1.11.2.
+      - alert: LibraryReportNoMounts
+        expr: tapelibrary_library_report_mounts == 0
+        for: 6h
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter library {{ $labels.library }} has mounted no cartridge for 6 hours'
+          description: 'Library {{ $labels.library }} has reported zero mounts in every hourly window for 6 hours. If work was expected, look host-side first: the library reporting zero mounts is the same observation whether nothing asked it to mount or it could not. Check tapelibrary_library_state and tapelibrary_drive_state for a library-side cause, and LibraryReportWindowStale to confirm the windows are actually advancing.'
+
+      # Both environmental pairs read against R1.11.2's ALLOWABLE envelope
+      # (16-32 °C, 20-80% RH), never its RECOMMENDED one (16-25 °C,
+      # 20-50% RH), with one deliberate exception noted below. The manual
+      # writes both for the CUSTOMER-SUPPLIED AMBIENT sensors outside the
+      # enclosure, while these readings come from the drives inside it, which
+      # run hotter: the reference capture's healthy library sits at ~25 °C
+      # average and 28.5 °C maximum, already past the recommended ambient
+      # ceiling. A rule on the recommended bound would therefore fire
+      # continuously on a library that is completely fine.
+      #
+      # The two tiers differ by SCOPE rather than by threshold, which is what
+      # keeps both of them anchored to the single number the manual actually
+      # states. Warning: the hottest single drive is over the allowable
+      # ceiling. Critical: the whole drive population averages over it, which
+      # is a room problem rather than a drive problem.
+      - alert: LibraryReportTemperatureHigh
+        expr: tapelibrary_library_report_temperature_max_celsius > 32
+        for: 2h
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter library {{ $labels.library }} has a drive above its allowable temperature'
+          description: 'The hottest drive in library {{ $labels.library }} reported {{ $value }} °C, above R1.11.2''s allowable ceiling of 32 °C, for 2 hourly windows. Compare against tapelibrary_library_report_temperature_average_celsius: if only the maximum is high the cause is one drive or its airflow, and tapelibrary_drive_state names the candidates.'
+
+      - alert: LibraryReportTemperatureHigh
+        expr: tapelibrary_library_report_temperature_average_celsius > 32
+        for: 2h
+        labels:
+          severity: critical
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter library {{ $labels.library }} is above its allowable temperature across every drive'
+          description: 'Library {{ $labels.library }} averaged {{ $value }} °C across all drives, above R1.11.2''s allowable ceiling of 32 °C, for 2 hourly windows. An average this high is room cooling, not a single drive. Media held above its rated environment loses life it does not get back.'
+
+      # The warning tier is the one place the RECOMMENDED bound is used, and
+      # it earns the exception twice over: 50% RH is simultaneously R1.11.2's
+      # recommended ceiling and the exact threshold the legacy RoS rule
+      # (samples/legacy/library-alerts.yml, `avg(lib_drive_hum_avg) > 50`,
+      # for 1h) ran on this fleet for years without being a nuisance. Its
+      # `for: 1h` is carried over unchanged. The capture sits at ~32%
+      # average, so there is real headroom below it.
+      - alert: LibraryReportHumidityHigh
+        expr: tapelibrary_library_report_humidity_average_ratio > 0.50
+        for: 1h
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter library {{ $labels.library }} is above 50% average humidity'
+          description: 'Library {{ $labels.library }} averaged {{ $value | humanizePercentage }} relative humidity across its drives, above R1.11.2''s recommended ceiling of 50%, for a full hourly window. This is the threshold the legacy RoS alerting used on this fleet. Watch it rather than act on it immediately, but find out why it is climbing.'
+
+      - alert: LibraryReportHumidityHigh
+        expr: tapelibrary_library_report_humidity_max_ratio > 0.80
+        for: 1h
+        labels:
+          severity: critical
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter library {{ $labels.library }} is above its allowable humidity'
+          description: 'A drive in library {{ $labels.library }} reported {{ $value | humanizePercentage }} relative humidity, above R1.11.2''s allowable ceiling of 80%, for a full hourly window. The manual specifies this envelope as non-condensing: past it, condensation on media is the failure mode, and it damages cartridges rather than merely shortening their life.'
+
+      # No rule ships on the four remaining activity figures (imports,
+      # exports, moves) or on the three data-volume gauges, and the omission
+      # is deliberate rather than an oversight. Every one of them is a
+      # measure of how much work the hosts asked for, so any threshold over
+      # them would page on a quiet week. They are dashboard material, and the
+      # ratio worth watching — written_by_hosts divided by
+      # written_to_cartridges, the window's average compression — has no
+      # grounded "bad" value on this fleet yet.
+      #
+      # tapelibrary_library_report_window_duration_seconds carries no rule
+      # either. It is 3600 on every window in the reference capture, and a
+      # short window is a reason to distrust that window's activity figures
+      # rather than an operational event in itself.
+
+      # ──────────────────────────────────────────────────────────────────
       # EXAMPLE: business alert (commented out: not loaded by Prometheus)
       # ──────────────────────────────────────────────────────────────────
       # A business alert fires on what your collectors actually measure, so

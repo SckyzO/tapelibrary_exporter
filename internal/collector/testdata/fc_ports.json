@@ -1,0 +1,50 @@
+[
+  {
+    "location": "fcPort_F1C4R1P0",
+    "driveLocation": "drive_F1C4R1",
+    "driveSn": "SN00000001",
+    "state": "communicationEstablished",
+    "wwpn": "5005076400000101",
+    "speedSetting": "auto",
+    "speedActual": "16Gbps",
+    "topologySetting": "auto-L",
+    "topologyActual": "N-Port",
+    "loopID": 13
+  },
+  {
+    "location": "fcPort_F1C4R2P1",
+    "driveLocation": "drive_F1C4R2",
+    "driveSn": "SN00000002",
+    "state": "noLightDetected",
+    "wwpn": "5005076400000202",
+    "speedSetting": "auto",
+    "speedActual": "unknown",
+    "topologySetting": "auto-L",
+    "topologyActual": "unknown",
+    "loopID": 78
+  },
+  {
+    "location": "fcPort_F11C2R3P0",
+    "driveLocation": "drive_F11C2R3",
+    "driveSn": "SN00000004",
+    "state": "noLightDetected",
+    "wwpn": "5005076400000401",
+    "speedSetting": "auto",
+    "speedActual": "1Gbps",
+    "topologySetting": "auto-L",
+    "topologyActual": "unknown",
+    "loopID": 55
+  },
+  {
+    "location": "fcPort_F11C3R2P0",
+    "driveLocation": "drive_F11C3R2",
+    "driveSn": "SN00000005",
+    "state": "communicationEstablished",
+    "wwpn": "5005076400000501",
+    "speedSetting": "8Gbps",
+    "speedActual": "8Gbps",
+    "topologySetting": "auto-L",
+    "topologyActual": "N-Port",
+    "loopID": 58
+  }
+]

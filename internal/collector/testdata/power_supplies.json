@@ -1,0 +1,34 @@
+[
+  {
+    "location": "powerSupply_F1PSa",
+    "state": "online"
+  },
+  {
+    "location": "powerSupply_F1PSb",
+    "state": "online"
+  },
+  {
+    "location": "powerSupply_F2PSa",
+    "state": "online"
+  },
+  {
+    "location": "powerSupply_F2PSb",
+    "state": "online"
+  },
+  {
+    "location": "powerSupply_F11PSa",
+    "state": "online"
+  },
+  {
+    "location": "powerSupply_F11PSb",
+    "state": "online"
+  },
+  {
+    "location": "powerSupply_F12PSa",
+    "state": "online"
+  },
+  {
+    "location": "powerSupply_F12PSb",
+    "state": "online"
+  }
+]
