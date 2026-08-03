@@ -619,6 +619,26 @@ func main() {
 	kingpin.Version(version.Print("tapelibrary_exporter"))
 	kingpin.HelpFlag.Short('h')
 
+	// --version and --help must answer WITHOUT a configuration file, and this
+	// check is what stands between them and the refusal below.
+	//
+	// kingpin handles both itself, inside Parse, which runs further down —
+	// after the mandatory --config.file check. So before 2026-08-04 a binary
+	// asked for its own version exited 1 with "the multi-instance target model
+	// requires --config.file", and so did `--help`. That is wrong for both:
+	// packaging, CI and container healthchecks all call --version on a binary
+	// they have no configuration for, and --help is the first thing an
+	// operator runs. Found by testing the artefact `make build` actually
+	// produces, which is the only way it could have been: every earlier run
+	// this session passed --config.file, because it was starting the exporter
+	// rather than interrogating it.
+	//
+	// Scanned from os.Args rather than from a parsed flag, necessarily: the
+	// whole point is that this decision has to be made before Parse.
+	if wantsVersionOrHelp(os.Args[1:]) {
+		kingpin.Parse() // prints and exits
+	}
+
 	// --config.file is mandatory here; read it before parsing (its value decides
 	// which arguments the parser is given).
 	configPath := config.ExtractFlagValue(os.Args[1:], "config.file")
@@ -822,4 +842,26 @@ func main() {
 	// instances x M collectors, a per-collector wait would worst-case at
 	// N*M*5s. See Registry.Wait's own doc comment.
 	registry.Wait(5 * time.Second)
+}
+
+// wantsVersionOrHelp reports whether the command line asks the binary to
+// describe itself rather than to run. Those two questions must be answerable
+// with no configuration file, so main consults this before enforcing
+// --config.file; kingpin.Parse then prints and exits on its own.
+//
+// A pure function over the argument slice, rather than a loop inline in main,
+// exists so the behaviour is testable: main's own path ends in os.Exit and
+// cannot be called from a test.
+//
+// Exact matches only. "--version=false" is not a request for the version, and
+// a value that merely contains the word (--config.file=/etc/version.yml) must
+// not be mistaken for one.
+func wantsVersionOrHelp(args []string) bool {
+	for _, arg := range args {
+		switch arg {
+		case "--version", "--help", "-h":
+			return true
+		}
+	}
+	return false
 }
