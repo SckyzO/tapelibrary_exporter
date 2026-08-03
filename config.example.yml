@@ -90,6 +90,28 @@ flags:
 # meant to be copied and tried should do. Uncomment it and point the paths
 # at your own files to use it.
 #
+# basic_auth CARRIES the credentials, but NO Authorization header is ever
+# sent. That is worth the surprise it causes, and it is not a bug.
+#
+# The TS4500 accepts no HTTP authentication scheme at all (verified against a
+# real library 2026-08-03: a GET carrying an Authorization header is answered
+# 401, with no WWW-Authenticate challenge). What it wants instead is those
+# same two strings POSTed to /v1/login, which returns a JSESSIONID cookie that
+# every subsequent request carries. This exporter performs that handshake for
+# you: it reads username/password (or password_file) out of the block below,
+# strips the block before building the transport so nothing goes on the wire
+# for no purpose, logs in on the first request, renews the session whenever
+# the library expires it, and logs out at shutdown.
+#
+# Practical consequences:
+#   - Omit basic_auth entirely and the exporter sends no credentials and
+#     performs no login, which every request will then be refused.
+#   - password_file is preferred over an inline password, and must contain
+#     ONLY the password: a trailing newline is trimmed, anything else is not.
+#   - Logging out at shutdown is not cosmetic. The library's session table is
+#     finite, so an exporter killed with SIGKILL repeatedly will eventually be
+#     refused a new session until the old ones expire on their own.
+#
 # A TS4500 running its FACTORY certificate needs insecure_skip_verify, and
 # that is forced by the hardware rather than chosen for convenience. Verified
 # against a real library 2026-08-03: the certificate is self-signed
