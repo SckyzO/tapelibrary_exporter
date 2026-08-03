@@ -1696,6 +1696,40 @@ groups:
       # simply has not needed servicing.
 
       # ──────────────────────────────────────────────────────────────────
+      # Business: duplicate cartridge barcodes (data quality)
+      # ──────────────────────────────────────────────────────────────────
+      # Two cartridges answering to one barcode is an operational fault, not
+      # a reading, and it is invisible from anywhere else: /v1/dataCartridges
+      # can tell them apart by location, so nothing there looks wrong, while
+      # /v1/dataCartridges/lifetimeMetrics reports no location at all and
+      # cannot.
+      #
+      # Observed on the reference fleet 2026-08-03: exactly one duplicated
+      # barcode among 9 673 distinct ones. The threshold is therefore > 0
+      # rather than a tuned number — this is a condition, not a level, and
+      # anything above zero means a human cannot reliably identify one of
+      # those cartridges either.
+      #
+      # The cost while it lasts is bounded and stated rather than hidden: the
+      # affected cartridges are excluded from the per-cartridge series (two
+      # series sharing a descriptor and a label set would fail the whole
+      # scrape, every collector included) but still counted in every
+      # aggregate, so no distribution is skewed by this.
+      #
+      # 24h of `for` because the fix is a physical relabel: someone has to
+      # find the cartridge and change its barcode. Paging faster would not
+      # make that happen sooner, and the exporter keeps working meanwhile.
+      - alert: DataCartridgeDuplicateVolser
+        expr: tapelibrary_data_cartridges_usage_duplicate_volsers > 0
+        for: 24h
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter library {{ $labels.library }} has {{ $value }} duplicated cartridge barcode(s)'
+          description: 'Library {{ $labels.library }} reports {{ $value }} barcode(s) carried by more than one cartridge. The exporter log names them at each refresh of the data_cartridges_lifetime collector, with the internal addresses of both cartridges so they can be located. Those cartridges are excluded from tapelibrary_data_cartridge_usage_* (their per-cartridge series cannot be keyed, since this endpoint reports no location) but remain counted in every tapelibrary_data_cartridges_usage_* aggregate, so no distribution here is skewed. Relabel one of the pair: while this stands, neither the exporter nor an operator can tell the two cartridges apart.'
+
+      # ──────────────────────────────────────────────────────────────────
       # Health: collector freshness (every background collector)
       # ──────────────────────────────────────────────────────────────────
       # These two read the freshness gauge every background collector emits,

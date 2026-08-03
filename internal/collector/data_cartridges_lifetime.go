@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"sync"
 	"time"
 
@@ -278,19 +280,37 @@ func (c *DataCartridgesLifetimeCollector) dataCartridgesLifetimeData(ctx context
 //     useful joined to tapelibrary_data_cartridge_info on volser, and that join
 //     is ambiguous precisely when the volser is duplicated.
 //
-// So a duplicate fails this collector closed, loudly, naming both internal
-// addresses so the offending cartridges can be found and one of them
-// relabelled. The aggregates go stale with it, which is the accepted cost: a
-// duplicate barcode is an operational fault in its own right, and this is not
-// yet observed on this fleet (60/60 and 69/69 distinct volsers in the two
-// cartridge captures). docs/exporter-journal.md carries it as an open question.
-func parseDataCartridgesLifetime(b []byte) ([]dataCartridgeUsageStats, error) {
+// **A duplicate volser is reported, not fatal**, and that balance was set on
+// 2026-08-03 against the real fleet rather than reasoned about in advance.
+// This collector used to reject the whole response on one, on the argument
+// that a volser must be unique for the per-cartridge series to be keyed at
+// all. The live library then produced exactly one duplicate among 9 673
+// distinct barcodes — 2 cartridges out of 9 674, 0.02% — and that single
+// ambiguity took out all five AGGREGATE families as well, permanently, for
+// the whole library. The aggregates key on nothing: they are distributions
+// over the parc, and a duplicated barcode is still two real cartridges whose
+// usage belongs in them.
+//
+// So the fail-closed behaviour is kept exactly where the key is load-bearing
+// and nowhere else. Every entry counts towards the aggregates. The
+// per-cartridge families skip the ambiguous volsers, which is what keeps two
+// series from ever sharing a descriptor and a label set — the failure that
+// takes down Registry.Gather for the whole scrape, every collector included.
+// The parser therefore reports which volsers are duplicated rather than
+// refusing, and refresh decides what to do with them.
+//
+// The duplicate is not swept under the carpet either: it is an operational
+// fault worth fixing (two cartridges cannot be told apart by barcode, so
+// neither can a human), and
+// tapelibrary_data_cartridges_usage_duplicate_volsers publishes the count so
+// DataCartridgeDuplicateVolser can page on it.
+func parseDataCartridgesLifetime(b []byte) ([]dataCartridgeUsageStats, map[string]struct{}, error) {
 	var entries []dataCartridgeUsageStats
 	if err := json.Unmarshal(b, &entries); err != nil {
-		return nil, fmt.Errorf("parse data cartridges lifetime response: %w", err)
+		return nil, nil, fmt.Errorf("parse data cartridges lifetime response: %w", err)
 	}
 	if len(entries) == 0 {
-		return nil, fmt.Errorf("parse data cartridges lifetime response: no cartridges returned (a library that reports none has lost its inventory or truncated the response; keeping the previous cache)")
+		return nil, nil, fmt.Errorf("parse data cartridges lifetime response: no cartridges returned (a library that reports none has lost its inventory or truncated the response; keeping the previous cache)")
 	}
 
 	// Indexed rather than ranged by value: dataCartridgeUsageStats carries two
@@ -298,20 +318,25 @@ func parseDataCartridgesLifetime(b []byte) ([]dataCartridgeUsageStats, error) {
 	// gocritic's rangeValCopy flags. refresh below takes the address for the
 	// same reason.
 	seen := make(map[string]string, len(entries))
+	duplicated := map[string]struct{}{}
 	for i := range entries {
 		e := &entries[i]
+		// An entry with no barcode at all, or no internal address, is a
+		// malformed response rather than an ambiguous cartridge: neither can
+		// be counted or named, so these stay fatal.
 		if e.Volser == "" {
-			return nil, fmt.Errorf("parse data cartridges lifetime response: entry at internal address %q with an empty volser", e.InternalAddress)
+			return nil, nil, fmt.Errorf("parse data cartridges lifetime response: entry at internal address %q with an empty volser", e.InternalAddress)
 		}
 		if e.InternalAddress == "" {
-			return nil, fmt.Errorf("parse data cartridges lifetime response: entry with volser %q and an empty internal address", e.Volser)
+			return nil, nil, fmt.Errorf("parse data cartridges lifetime response: entry with volser %q and an empty internal address", e.Volser)
 		}
-		if prev, dup := seen[e.Volser]; dup {
-			return nil, fmt.Errorf("parse data cartridges lifetime response: duplicate volser %q at internal addresses %q and %q (this endpoint reports no location, so a volser must be unique for the per-cartridge series to be keyed at all; relabel one cartridge)", e.Volser, prev, e.InternalAddress)
+		if _, dup := seen[e.Volser]; dup {
+			duplicated[e.Volser] = struct{}{}
+			continue
 		}
 		seen[e.Volser] = e.InternalAddress
 	}
-	return entries, nil
+	return entries, duplicated, nil
 }
 
 // dataCartridgesLifetimeGetMetrics is the glue between the I/O step
@@ -319,10 +344,10 @@ func parseDataCartridgesLifetime(b []byte) ([]dataCartridgeUsageStats, error) {
 // (parseDataCartridgesLifetime): the shape every collector in this exporter
 // follows, regardless of flavor. refresh, below, calls this on its own
 // background schedule; nothing else in this file calls the library directly.
-func (c *DataCartridgesLifetimeCollector) dataCartridgesLifetimeGetMetrics(ctx context.Context) ([]dataCartridgeUsageStats, error) {
+func (c *DataCartridgesLifetimeCollector) dataCartridgesLifetimeGetMetrics(ctx context.Context) ([]dataCartridgeUsageStats, map[string]struct{}, error) {
 	data, err := c.dataCartridgesLifetimeData(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	return parseDataCartridgesLifetime(data)
 }
@@ -404,16 +429,17 @@ type DataCartridgesLifetimeCollector struct {
 	// costs detail — neither can silence an alert.
 	perVolser bool
 
-	motion          *prometheus.Desc
-	mounts          *prometheus.Desc
-	written         *prometheus.Desc
-	errors          *prometheus.Desc
-	unknown         *prometheus.Desc
-	cartMotion      *prometheus.Desc
-	cartMounts      *prometheus.Desc
-	cartWritten     *prometheus.Desc
-	cartErrors      *prometheus.Desc
-	lastRefreshDesc *prometheus.Desc
+	motion           *prometheus.Desc
+	mounts           *prometheus.Desc
+	written          *prometheus.Desc
+	errors           *prometheus.Desc
+	unknown          *prometheus.Desc
+	duplicateVolsers *prometheus.Desc
+	cartMotion       *prometheus.Desc
+	cartMounts       *prometheus.Desc
+	cartWritten      *prometheus.Desc
+	cartErrors       *prometheus.Desc
+	lastRefreshDesc  *prometheus.Desc
 
 	// mu guards cached and lastRefresh: refresh (below) writes them from the
 	// background goroutine started by Start, Collect reads them from whichever
@@ -476,6 +502,11 @@ func NewDataCartridgesLifetimeCollector(log *logger.Logger, client *Client, inte
 			"tapelibrary_data_cartridges_usage_unknown",
 			"Number of data cartridges excluded from the usage histograms, by reason. Always emitted for both reasons. reason=\"unread\" is a cartridge whose memory the library has not read, which returns all seven counters as null at once and is the endpoint's ordinary shape rather than a fault (39% of the reference capture). reason=\"invalid\" is a cartridge that reported a negative counter or a partial record, which is a cartridge-memory fault worth investigating. Each histogram's _count plus both of these is the library's full cartridge parc.",
 			[]string{"reason"}, nil,
+		),
+		duplicateVolsers: prometheus.NewDesc(
+			"tapelibrary_data_cartridges_usage_duplicate_volsers",
+			"Number of barcodes this endpoint reported on more than one cartridge. Normally 0, and anything above it is an operational fault rather than a reading: two cartridges sharing a barcode cannot be told apart by a human either, and this endpoint reports no location to separate them. Those cartridges still count towards every aggregate here; only their per-cartridge series are withheld, since two metrics sharing a descriptor and a label set would fail the whole scrape. DataCartridgeDuplicateVolser reads this.",
+			nil, nil,
 		),
 		cartMotion: prometheus.NewDesc(
 			"tapelibrary_data_cartridge_usage_motion_meters_total",
@@ -573,10 +604,18 @@ func (d *dataCartridgeUsageStats) errorCounter(direction, correction string) int
 // what makes the flag a pure cardinality lever: flipping it off cannot silence
 // DataCartridgeUncorrectedErrorsRising.
 func (c *DataCartridgesLifetimeCollector) refresh(ctx context.Context) {
-	carts, err := c.dataCartridgesLifetimeGetMetrics(ctx)
+	carts, duplicated, err := c.dataCartridgesLifetimeGetMetrics(ctx)
 	if err != nil {
 		c.log.Error("Failed to refresh data cartridges lifetime metrics: keeping previous cache", "err", err)
 		return
+	}
+	if len(duplicated) > 0 {
+		// Logged once per refresh with the barcodes named, because the fix is
+		// operational: two cartridges carrying one barcode cannot be told
+		// apart by a human either. The count also ships as a metric, so this
+		// is discoverable without reading logs.
+		c.log.Warn("Duplicate volsers on the lifetime endpoint: excluding them from the per-cartridge series, aggregates are unaffected",
+			"count", len(duplicated), "volsers", slices.Sorted(maps.Keys(duplicated)))
 	}
 
 	// Per cartridge, when perVolser is on: motion, mounts, written and the four
@@ -633,6 +672,17 @@ func (c *DataCartridgesLifetimeCollector) refresh(ctx context.Context) {
 		if !c.perVolser {
 			continue
 		}
+		// The one place the missing `location` actually bites. Every other
+		// cartridge collector keys on volser+location; this endpoint reports
+		// no location, so a duplicated barcode cannot be resolved into two
+		// series. Emitting both would give two metrics the same descriptor and
+		// the same label set, which fails Registry.Gather for the WHOLE scrape
+		// — all nineteen collectors, not just this one. Skipping the pair is
+		// the narrowest possible response: it costs 2 series out of 9 674 on
+		// the reference fleet and leaves every aggregate whole.
+		if _, ambiguous := duplicated[dc.Volser]; ambiguous {
+			continue
+		}
 
 		metrics = append(metrics,
 			prometheus.MustNewConstMetric(c.cartMotion, prometheus.CounterValue, float64(*dc.MotionMeters), dc.Volser),
@@ -663,6 +713,7 @@ func (c *DataCartridgesLifetimeCollector) refresh(ctx context.Context) {
 	metrics = append(metrics,
 		prometheus.MustNewConstMetric(c.unknown, prometheus.GaugeValue, float64(invalid), dataCartridgeUsageInvalid),
 		prometheus.MustNewConstMetric(c.unknown, prometheus.GaugeValue, float64(unread), dataCartridgeUsageUnread),
+		prometheus.MustNewConstMetric(c.duplicateVolsers, prometheus.GaugeValue, float64(len(duplicated))),
 	)
 
 	c.mu.Lock()
@@ -685,6 +736,7 @@ func (c *DataCartridgesLifetimeCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.written
 	ch <- c.errors
 	ch <- c.unknown
+	ch <- c.duplicateVolsers
 	ch <- c.cartMotion
 	ch <- c.cartMounts
 	ch <- c.cartWritten

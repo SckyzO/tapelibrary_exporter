@@ -59,7 +59,7 @@ func TestParseDataCartridgesLifetime(t *testing.T) {
 		t.Fatalf("read fixture: %v", err)
 	}
 
-	carts, err := parseDataCartridgesLifetime(data)
+	carts, _, err := parseDataCartridgesLifetime(data)
 	if err != nil {
 		t.Fatalf("parseDataCartridgesLifetime(fixture): %v", err)
 	}
@@ -126,7 +126,7 @@ func TestParseDataCartridgesLifetime(t *testing.T) {
 	}
 
 	t.Run("rejects malformed JSON", func(t *testing.T) {
-		if _, err := parseDataCartridgesLifetime([]byte(`{`)); err == nil {
+		if _, _, err := parseDataCartridgesLifetime([]byte(`{`)); err == nil {
 			t.Fatal("parseDataCartridgesLifetime(`{`) = nil error, want a parse error")
 		}
 	})
@@ -134,53 +134,58 @@ func TestParseDataCartridgesLifetime(t *testing.T) {
 	t.Run("rejects an empty array", func(t *testing.T) {
 		// A library reporting zero cartridges has lost its inventory or
 		// truncated the body: keeping the previous cache is the safer reading.
-		if _, err := parseDataCartridgesLifetime([]byte(`[]`)); err == nil {
+		if _, _, err := parseDataCartridgesLifetime([]byte(`[]`)); err == nil {
 			t.Fatal("parseDataCartridgesLifetime(`[]`) = nil error, want an error")
 		}
 	})
 
 	t.Run("rejects an empty volser", func(t *testing.T) {
 		body := `[{"volser":"","internalAddress":"0112C6","motionMeters":1,"mounts":1,"dataWrittenToCartridge":1,"errorsCorrectedRead":0,"errorsCorrectedWrite":0,"errorsUncorrectedRead":0,"errorsUncorrectedWrite":0}]`
-		if _, err := parseDataCartridgesLifetime([]byte(body)); err == nil {
+		if _, _, err := parseDataCartridgesLifetime([]byte(body)); err == nil {
 			t.Fatal("empty volser accepted, want an error")
 		}
 	})
 
 	t.Run("rejects an empty internal address", func(t *testing.T) {
 		body := `[{"volser":"TST001JD","internalAddress":"","motionMeters":1,"mounts":1,"dataWrittenToCartridge":1,"errorsCorrectedRead":0,"errorsCorrectedWrite":0,"errorsUncorrectedRead":0,"errorsUncorrectedWrite":0}]`
-		if _, err := parseDataCartridgesLifetime([]byte(body)); err == nil {
+		if _, _, err := parseDataCartridgesLifetime([]byte(body)); err == nil {
 			t.Fatal("empty internal address accepted, want an error")
 		}
 	})
 
-	// The one place this collector is stricter than its siblings, and the
-	// reason is Registry.Gather rather than tidiness: this endpoint reports no
-	// location, so two entries under one volser would give two metrics the same
-	// descriptor and label set and fail the scrape for every collector and every
-	// library at once. The error must name both internal addresses, or the
-	// offending pair cannot be found.
-	t.Run("rejects a duplicate volser and names both addresses", func(t *testing.T) {
+	// Changed 2026-08-03 against the real fleet: this used to reject the whole
+	// response, and the live library produced exactly one duplicated barcode
+	// among 9 673 distinct ones — which took out all five AGGREGATE families
+	// too, permanently, for a 0.02% ambiguity that does not affect them at all.
+	//
+	// The fail-closed behaviour is kept only where the key is load-bearing:
+	// the per-cartridge series, where two entries under one volser would give
+	// two metrics the same descriptor and label set and fail Registry.Gather
+	// for every collector and every library at once. The parser now reports
+	// the duplicate instead of refusing, and both entries stay in the slice so
+	// the aggregates keep counting them.
+	t.Run("reports a duplicate volser rather than rejecting the response", func(t *testing.T) {
 		body := `[
 			{"volser":"TST001JD","internalAddress":"0112C6","motionMeters":1,"mounts":1,"dataWrittenToCartridge":1,"errorsCorrectedRead":0,"errorsCorrectedWrite":0,"errorsUncorrectedRead":0,"errorsUncorrectedWrite":0},
-			{"volser":"TST001JD","internalAddress":"030403","motionMeters":2,"mounts":2,"dataWrittenToCartridge":2,"errorsCorrectedRead":0,"errorsCorrectedWrite":0,"errorsUncorrectedRead":0,"errorsUncorrectedWrite":0}
+			{"volser":"TST001JD","internalAddress":"030403","motionMeters":2,"mounts":2,"dataWrittenToCartridge":2,"errorsCorrectedRead":0,"errorsCorrectedWrite":0,"errorsUncorrectedRead":0,"errorsUncorrectedWrite":0},
+			{"volser":"TST002JD","internalAddress":"030404","motionMeters":3,"mounts":3,"dataWrittenToCartridge":3,"errorsCorrectedRead":0,"errorsCorrectedWrite":0,"errorsUncorrectedRead":0,"errorsUncorrectedWrite":0}
 		]`
-		_, err := parseDataCartridgesLifetime([]byte(body))
-		if err == nil {
-			t.Fatal("duplicate volser accepted, want an error")
+		carts, dup, err := parseDataCartridgesLifetime([]byte(body))
+		if err != nil {
+			t.Fatalf("duplicate volser rejected the response: %v", err)
 		}
-		for _, want := range []string{"TST001JD", "0112C6", "030403"} {
-			if !strings.Contains(err.Error(), want) {
-				t.Errorf("error %q does not name %q", err, want)
-			}
+		if len(carts) != 3 {
+			t.Errorf("len(carts) = %d, want 3: both halves of a duplicate still belong in the aggregates", len(carts))
+		}
+		if _, ok := dup["TST001JD"]; !ok || len(dup) != 1 {
+			t.Errorf("duplicated = %v, want exactly TST001JD", dup)
 		}
 	})
 
-	// A volser repeated across DIFFERENT responses is not a duplicate: the
-	// rejection is per response, so a stable inventory parses on every refresh.
 	t.Run("accepts the same volser on a later response", func(t *testing.T) {
 		body := `[{"volser":"TST001JD","internalAddress":"0112C6","motionMeters":1,"mounts":1,"dataWrittenToCartridge":1,"errorsCorrectedRead":0,"errorsCorrectedWrite":0,"errorsUncorrectedRead":0,"errorsUncorrectedWrite":0}]`
 		for i := 0; i < 2; i++ {
-			if _, err := parseDataCartridgesLifetime([]byte(body)); err != nil {
+			if _, _, err := parseDataCartridgesLifetime([]byte(body)); err != nil {
 				t.Fatalf("parse %d: %v", i, err)
 			}
 		}
@@ -193,7 +198,7 @@ func TestParseDataCartridgesLifetime(t *testing.T) {
 // of not handling it is a silent 0 in whichever family lost its field.
 func TestDataCartridgesLifetimeCollector_ValidRejectsAPartialRecord(t *testing.T) {
 	body := `[{"volser":"TST001JD","internalAddress":"0112C6","motionMeters":100,"mounts":null,"dataWrittenToCartridge":1,"errorsCorrectedRead":0,"errorsCorrectedWrite":0,"errorsUncorrectedRead":0,"errorsUncorrectedWrite":0}]`
-	carts, err := parseDataCartridgesLifetime([]byte(body))
+	carts, _, err := parseDataCartridgesLifetime([]byte(body))
 	if err != nil {
 		t.Fatalf("parseDataCartridgesLifetime: %v", err)
 	}
@@ -232,8 +237,8 @@ func TestDataCartridgesLifetimeCollector_Describe(t *testing.T) {
 	for range ch {
 		count++
 	}
-	if count != 10 {
-		t.Fatalf("Describe sent %d descriptors, want 10", count)
+	if count != 11 {
+		t.Fatalf("Describe sent %d descriptors, want 11", count)
 	}
 }
 
@@ -253,8 +258,8 @@ func TestDataCartridgesLifetimeCollector_DescribeIsConstantWithoutPerVolser(t *t
 	for range ch {
 		count++
 	}
-	if count != 10 {
-		t.Fatalf("Describe sent %d descriptors with per-volser off, want 10", count)
+	if count != 11 {
+		t.Fatalf("Describe sent %d descriptors with per-volser off, want 11", count)
 	}
 }
 
@@ -405,8 +410,8 @@ tapelibrary_data_cartridges_usage_unknown{reason="unread"} 1
 	// the cardinality budget in docs/exporter-journal.md legitimately differ:
 	// 10 metrics expand on the wire to 7 x (6 buckets + Inf + sum + count) = 63,
 	// plus 2 + 1, for 66 series.
-	if count != 10 {
-		t.Fatalf("GatherAndCount = %d, want 10", count)
+	if count != 11 {
+		t.Fatalf("GatherAndCount = %d, want 11", count)
 	}
 }
 
@@ -508,8 +513,8 @@ tapelibrary_data_cartridge_usage_written_bytes_total{volser="TST147JD"} 7.120751
 		t.Fatalf("GatherAndCount: %v", err)
 	}
 	// The 10 aggregate metrics plus 6 cartridges x 7 per-cartridge metrics.
-	if count != 52 {
-		t.Fatalf("GatherAndCount = %d, want 52", count)
+	if count != 53 {
+		t.Fatalf("GatherAndCount = %d, want 53", count)
 	}
 }
 
@@ -767,8 +772,8 @@ func TestDataCartridgesLifetimeCollector_ErrorKeepsPreviousCache(t *testing.T) {
 	}
 	// A surviving cache emits 10: the 9 cached from the successful first refresh
 	// plus the freshness gauge. A wrongly-cleared cache would emit only 1.
-	if count != 10 {
-		t.Fatalf("GatherAndCount = %d, want 10: the previous cache must survive a later refresh error", count)
+	if count != 11 {
+		t.Fatalf("GatherAndCount = %d, want 11: the previous cache must survive a later refresh error", count)
 	}
 }
 

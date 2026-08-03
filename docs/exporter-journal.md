@@ -2634,6 +2634,40 @@ library, so it exercises perhaps a third of the enumerated states.
   introduced a `containsString` helper that collided with one already declared in
   `docs_check_test.go` — invisible to `go build`, which excludes test files, and
   caught only by `go test`.
+- **A duplicated volser used to kill this collector's aggregates too, and no
+  longer does** (found and fixed 2026-08-03, the first time
+  `data_cartridges_lifetime` ever completed against real hardware).
+  `/v1/dataCartridges/lifetimeMetrics` reports **no `location`**, which is what
+  makes it the one cartridge endpoint where the `volser` + `location` key this
+  file mandates everywhere else is simply unavailable. The collector was
+  written to fail the whole response on a duplicate, on the argument that the
+  per-cartridge series could not otherwise be keyed. That argument is correct
+  and it was applied too widely.
+  **The live library then produced exactly one duplicated barcode among 9 673
+  distinct ones** — `050760JD`, at internal addresses `021632` and `020608`, 2
+  cartridges out of 9 674, 0.02%. That single ambiguity took out all five
+  AGGREGATE families as well, permanently, for the whole library. The
+  aggregates key on nothing: they are distributions over the parc, and a
+  duplicated barcode is still two real cartridges whose usage belongs in them.
+  **So fail-closed is kept exactly where the key is load-bearing and nowhere
+  else.** Every entry counts towards the aggregates; only the per-cartridge
+  families skip the ambiguous volsers, which is what stops two metrics ever
+  sharing a descriptor and a label set — the failure that takes down
+  `Registry.Gather` for the whole scrape, all nineteen collectors at once.
+  `internalAddress` was again rejected as a tie-breaker, for the reason this
+  file already records: R1.11.2 documents it as changing whenever a cartridge
+  is assigned, unassigned or moved, so at 9 674 cartridges it would churn a
+  fresh series out of every robot move.
+  **The duplicate is surfaced rather than absorbed**, at the maintainer's
+  instruction and correctly: two cartridges answering to one barcode is an
+  operational fault a human cannot resolve either.
+  `tapelibrary_data_cartridges_usage_duplicate_volsers` publishes the count and
+  `DataCartridgeDuplicateVolser` pages on `> 0` after 24h — a condition, not a
+  level, with the `for` sized to a physical relabel rather than to a page.
+  **The rule this sets for every collector after it: validate a key only where
+  a key is actually used.** A response that cannot be keyed for one family is
+  not necessarily unusable for the others, and refusing it wholesale trades
+  everything for the part that is ambiguous.
 - **The concurrency ceiling decided in `## Architecture decisions` is not the
   shipped default** (found 2026-08-03). That section fixes it at 1, and
   `--exporter.max-requests-per-target` defaults to **0, meaning unlimited**. The
@@ -2649,6 +2683,23 @@ library, so it exercises perhaps a third of the enumerated states.
   three parts that must land together: the ceiling at 1, a staggered or jittered
   first refresh so the boot storm spreads, and timeouts sized against the table
   above rather than against a shared 5s. Decide all three at once.
+  - **Resolved 2026-08-03, with the middle part replaced by something better.**
+    The ceiling now defaults to 1, the timeouts are calibrated from the table
+    above, and the two heavy cartridge collectors moved from 15m to 1h (together
+    they needed more than 900s of the single slot per 900s cycle). **The stagger
+    was NOT implemented, and deliberately so**: delaying `Start` is unsafe on
+    this lifecycle, because `done` is created in the constructor and closed by
+    `Start`'s goroutine, so a `Start` that never runs (context cancelled during
+    the delay) leaves `Done()` open and hangs shutdown for its whole budget.
+    What shipped instead is a **split of the queue budget from the request
+    budget** in `Client.Fetch`: the wait for a slot is bounded by
+    `--exporter.max-queue-wait` (15m) and the request by the collector's own
+    timeout. That fixes any alignment rather than only the boot storm, touches
+    no collector, and needs no lifecycle change. R1.11.2 turned out to support
+    the ceiling directly, which the original decision only inferred: its "Query
+    and task flow" notes require each REST response to be retrieved before the
+    next command is sent.
+    **Result against the real fleet: 17 of 19 collectors populated, from 0.**
 - **`success=1` is emitted while nothing works** (found 2026-08-03, and the most
   serious observability gap in this exporter). `StatusTracker` counts the metrics a
   collector emits per scrape, and a background collector ALWAYS emits its

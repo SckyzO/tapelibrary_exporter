@@ -841,6 +841,7 @@ not what makes it slow; the inventory walk is, and that walk is identical.
 
 **Two distinct ways a cartridge can have no usable reading, counted apart.**
 `tapelibrary_data_cartridges_usage_unknown` carries a `reason` label because
+| `tapelibrary_data_cartridges_usage_duplicate_volsers` | Gauge | - | Number of barcodes this endpoint reported on more than one cartridge. Normally 0, and anything above it is an operational fault rather than a reading: two cartridges sharing a barcode cannot be told apart by a human either, and this endpoint reports no `location` to separate them. Those cartridges still count towards every aggregate here; only their per-cartridge series are withheld, since two metrics sharing a descriptor and a label set would fail the whole scrape. `DataCartridgeDuplicateVolser` reads this. |
 merging them would hide the one that matters:
 
 - `reason="unread"` — the library has not read the cartridge's memory, so all
