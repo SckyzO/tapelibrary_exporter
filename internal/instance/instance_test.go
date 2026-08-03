@@ -68,7 +68,7 @@ func TestFactoryBuildsAndStarts(t *testing.T) {
 		},
 	}
 
-	h := NewHandle("machine-a", "https://machine-a", &http.Client{}, 0, nil)
+	h := NewHandle("machine-a", "https://machine-a", &http.Client{}, 0, nil, 0)
 	bg, err := f.New(h)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -95,7 +95,7 @@ func TestFactoryBuildsAndStarts(t *testing.T) {
 // collector reaching it with no deadline would hang its poller forever. That is
 // a configuration fault and it must fail the boot, not surface at 3am.
 func TestClientForRejectsANonPositiveTimeout(t *testing.T) {
-	h := NewHandle("lib1", "https://a.example", &http.Client{}, 0, nil)
+	h := NewHandle("lib1", "https://a.example", &http.Client{}, 0, nil, 0)
 	if _, err := h.ClientFor(0); err == nil {
 		t.Fatal("ClientFor accepted a zero timeout")
 	}
@@ -116,7 +116,7 @@ func TestSetTransportReachesEveryClient(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	h := NewHandle("lib1", srv.URL, &http.Client{}, 0, nil)
+	h := NewHandle("lib1", srv.URL, &http.Client{}, 0, nil, 0)
 	a, err := h.ClientFor(time.Second)
 	if err != nil {
 		t.Fatalf("ClientFor: %v", err)
@@ -145,7 +145,7 @@ func TestSetTransportReachesEveryClient(t *testing.T) {
 // TestHandleSharesOneLimiter proves an instance's collectors contend for one
 // ceiling, which is the whole point of hanging it on the Handle.
 func TestHandleSharesOneLimiter(t *testing.T) {
-	h := NewHandle("lib1", "https://a.example", &http.Client{}, 1, nil)
+	h := NewHandle("lib1", "https://a.example", &http.Client{}, 1, nil, 0)
 	a, _ := h.ClientFor(time.Second)
 	b, _ := h.ClientFor(time.Second)
 	if a.Limiter() == nil {
@@ -155,7 +155,7 @@ func TestHandleSharesOneLimiter(t *testing.T) {
 		t.Fatal("two collectors of one instance got different limiters")
 	}
 
-	unlimited := NewHandle("lib2", "https://b.example", &http.Client{}, 0, nil)
+	unlimited := NewHandle("lib2", "https://b.example", &http.Client{}, 0, nil, 0)
 	c, _ := unlimited.ClientFor(time.Second)
 	if c.Limiter() != nil {
 		t.Fatal("a Handle built with ceiling 0 handed out a limiter")
@@ -189,7 +189,7 @@ func testRegistry(t *testing.T, root *prometheus.Registry) (*Registry, *[]*fakeB
 			return bg, nil
 		},
 	}}
-	return NewRegistry(logger.NewTextLogger("error"), root, "target", factories, 0), made
+	return NewRegistry(logger.NewTextLogger("error"), root, "target", factories, 0, 0), made
 }
 
 // inst builds the resolved instance list a test reconciles against.
@@ -558,7 +558,7 @@ func TestPrepareMutatesNothingOnFailure(t *testing.T) {
 			made++
 			return newFakeBG("example"), nil
 		},
-	}}, 0)
+	}}, 0, 0)
 
 	applyOrFail(t, r, ctx, []config.ResolvedInstance{inst("lib1", "https://a.example", nil, nil)})
 	before := seriesFor(t, root, "lib1")
@@ -644,7 +644,7 @@ func TestWaitSharesOneBudgetAcrossCollectors(t *testing.T) {
 		{Name: "late", Enabled: &enabled, New: func(h *Handle) (BackgroundCollector, error) { return newTimedBG("late", lateAfter), nil }},
 		{Name: "stuck", Enabled: &enabled, New: func(h *Handle) (BackgroundCollector, error) { return newFakeBG("stuck"), nil }},
 	}
-	r := NewRegistry(logger.NewTextLogger("error"), root, "target", factories, 0)
+	r := NewRegistry(logger.NewTextLogger("error"), root, "target", factories, 0, 0)
 	applyOrFail(t, r, ctx, []config.ResolvedInstance{inst("lib1", "https://a.example", nil, nil)})
 
 	start := time.Now()
@@ -707,7 +707,7 @@ func TestWaitSharesOneBudgetAcrossInstances(t *testing.T) {
 			return newFakeBG("stuck"), nil
 		}},
 	}
-	r := NewRegistry(logger.NewTextLogger("error"), root, "target", factories, 0)
+	r := NewRegistry(logger.NewTextLogger("error"), root, "target", factories, 0, 0)
 	applyOrFail(t, r, ctx, []config.ResolvedInstance{
 		inst("inst-a-late", "https://a.example", nil, nil),
 		inst("inst-b-stuck", "https://b.example", nil, nil),

@@ -56,8 +56,9 @@ type Handle struct {
 	Name    string
 	Address string
 
-	tr      *collector.Transport
-	limiter *collector.Limiter
+	tr          *collector.Transport
+	limiter     *collector.Limiter
+	queueBudget time.Duration
 
 	// labels are the identifying and extra labels this machine's series
 	// carry. Applied by prometheus.WrapRegistererWith at REGISTRATION, with
@@ -96,13 +97,14 @@ type Handle struct {
 // NewHandle builds a handle for one machine. hc is the client its collectors
 // share, built once from the instance's resolved module. limit is
 // --exporter.max-requests-per-target; 0 means unlimited.
-func NewHandle(name, address string, hc *http.Client, limit int, labels prometheus.Labels) *Handle {
+func NewHandle(name, address string, hc *http.Client, limit int, labels prometheus.Labels, queueBudget time.Duration) *Handle {
 	return &Handle{
-		Name:    name,
-		Address: address,
-		tr:      collector.NewTransport(hc),
-		limiter: collector.NewLimiter(limit),
-		labels:  labels,
+		Name:        name,
+		Address:     address,
+		tr:          collector.NewTransport(hc),
+		limiter:     collector.NewLimiter(limit),
+		labels:      labels,
+		queueBudget: queueBudget,
 	}
 }
 
@@ -118,7 +120,7 @@ func (h *Handle) ClientFor(timeout time.Duration) (*collector.Client, error) {
 	if timeout <= 0 {
 		return nil, fmt.Errorf("instance %q: a collector timeout must be positive, got %v (the shared transport carries no timeout of its own)", h.Name, timeout)
 	}
-	return collector.NewClientOn(h.tr, h.Address, timeout).WithLimiter(h.limiter), nil
+	return collector.NewClientOn(h.tr, h.Address, timeout).WithLimiter(h.limiter).WithQueueBudget(h.queueBudget), nil
 }
 
 // SetTransport installs a new shared client and returns the one it replaced, so
@@ -160,6 +162,13 @@ type Registry struct {
 	factories     []Factory // already filtered to the globally-enabled ones
 	limit         int       // --exporter.max-requests-per-target
 
+	// queueBudget is --exporter.max-queue-wait: how long a collector may wait
+	// for this machine's single request slot before giving up the round. It
+	// is separate from any collector's own request timeout, because with a
+	// ceiling of 1 a queue is the normal state and a collector's position in
+	// it says nothing about how long its own request needs.
+	queueBudget time.Duration
+
 	handles map[string]*Handle // live, by instance name
 
 	// labelKeys is the sorted set of extra instance label KEYS this registry
@@ -178,13 +187,14 @@ type Registry struct {
 // NewRegistry builds an empty registry. root is the exporter's own registry;
 // each instance's collectors are registered on a wrapper of it carrying that
 // instance's labels.
-func NewRegistry(log *logger.Logger, root prometheus.Registerer, instanceLabel string, factories []Factory, limit int) *Registry {
+func NewRegistry(log *logger.Logger, root prometheus.Registerer, instanceLabel string, factories []Factory, limit int, queueBudget time.Duration) *Registry {
 	return &Registry{
 		log:           log,
 		root:          root,
 		instanceLabel: instanceLabel,
 		factories:     factories,
 		limit:         limit,
+		queueBudget:   queueBudget,
 		handles:       make(map[string]*Handle),
 	}
 }
@@ -279,7 +289,7 @@ func (r *Registry) Prepare(instances []config.ResolvedInstance) (*Plan, error) {
 			if err != nil {
 				return nil, fmt.Errorf("instance %q: %w", inst.Name, err)
 			}
-			h := NewHandle(inst.Name, inst.Address, hc, r.limit, labels)
+			h := NewHandle(inst.Name, inst.Address, hc, r.limit, labels, r.queueBudget)
 			h.clientConfig = inst.ClientConfig
 			h.session = session
 

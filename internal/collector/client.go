@@ -184,6 +184,24 @@ func (c *Client) WithLimiter(lim *Limiter) *Client {
 	return c
 }
 
+// WithQueueBudget bounds how long this Client will WAIT for a limiter slot,
+// separately from how long it will spend on the request once it has one.
+//
+// It exists because a concurrency ceiling of 1 makes queueing the normal
+// state rather than an anomaly: the TS4500 serializes internally, so every
+// collector of one library takes its turn, and a collector's position in
+// that queue has nothing to do with how long its own request needs. Fetch
+// applies this budget to the wait and c.timeout to the request, so the two
+// can be sized from what they actually measure — a queue budget in minutes,
+// a request budget in seconds.
+//
+// Leave it unset (the constructors default it to the request timeout) for a
+// Client with no limiter attached, where it is never read.
+func (c *Client) WithQueueBudget(d time.Duration) *Client {
+	c.acquireTimeout = d
+	return c
+}
+
 // Limiter returns the ceiling this Client contends for, or nil when
 // unlimited. Exported for tests that assert two collectors of one instance
 // share one ceiling.
@@ -295,29 +313,43 @@ func (c *Client) Fetch(ctx context.Context, path string) (data []byte, err error
 		RequestDuration.WithLabelValues(outcome).Observe(time.Since(start).Seconds())
 	}()
 
-	// The per-collector deadline, for Clients sharing a Transport (see
-	// NewClientOn). A Client built with NewClient never reaches this: its
-	// deadline lives on its own private http.Client.Timeout, so its c.timeout
-	// stays zero and this block is a no-op for it.
+	// Wait for a request slot BEFORE the per-collector deadline starts.
 	//
-	// Applied before the limiter below on purpose: for a Client on this path,
-	// ctx now carries the ONLY deadline that governs the rest of this call,
-	// wait and request together, so the wait is charged against this
-	// collector's own budget, never added on top of it. A Client whose
-	// deadline lives on http.Client.Timeout instead reaches acquire below
-	// with no deadline on ctx at all; that path bounds the wait itself, via
-	// acquireTimeout, for exactly this reason. See acquire's own comment.
-	if c.timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, c.timeout)
-		defer cancel()
-	}
-
+	// This ordering is load-bearing and was reversed on 2026-08-03 after the
+	// first run against real hardware. The TS4500 serializes internally — its
+	// own manual requires the response to a REST command to be retrieved
+	// before the next command is sent — so a concurrency ceiling of 1 is the
+	// correct configuration and a queue in front of it is the NORMAL state,
+	// not a fault. Nineteen collectors of one library each want a slot, and
+	// with the previous ordering the wait was charged against the collector's
+	// own request budget: a collector queued behind its siblings burned its
+	// whole 5s waiting and then had nothing left for a request that takes one
+	// second. Measured on a real library, that starved 14 of 19 collectors on
+	// every sweep, permanently — the same-interval tickers all fire together,
+	// so the alignment never breaks up on its own.
+	//
+	// Splitting the two budgets is what makes a ceiling of 1 usable: the wait
+	// is bounded by acquireTimeout (a queue budget, minutes) and the request
+	// by c.timeout (a request budget, seconds), so time spent queueing can
+	// never consume the time needed to actually talk to the library. Total
+	// worst case is the sum of the two, both bounded, and a collector that
+	// cannot get a slot within its queue budget fails fast and lets the next
+	// tick try again rather than issuing a request it has no time to finish.
 	release, err := c.acquire(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("wait for a request slot for %s: %w", path, err)
 	}
 	defer release()
+
+	// The per-collector deadline, for Clients sharing a Transport (see
+	// NewClientOn). A Client built with NewClient never reaches this: its
+	// deadline lives on its own private http.Client.Timeout, so its c.timeout
+	// stays zero and this block is a no-op for it.
+	if c.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.timeout)
+		defer cancel()
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
 	if err != nil {

@@ -58,7 +58,7 @@ func TestClientForInstallsTheSession(t *testing.T) {
 		t.Error("clientFor cleared BasicAuth on the CALLER's config, not on its own copy")
 	}
 
-	h := NewHandle("lib1", srv.URL, hc, 0, nil)
+	h := NewHandle("lib1", srv.URL, hc, 0, nil, 0)
 	h.session = session
 	c, err := h.ClientFor(2e9) // 2s
 	if err != nil {

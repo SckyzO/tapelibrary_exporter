@@ -85,14 +85,44 @@ var (
 	// nothing.
 	//
 	// A ceiling turns a slow collector into a source of starvation for its
-	// siblings, so it is a deliberate choice with a visible cost. The wait is
-	// charged against each collector's own timeout, and
+	// siblings, so it is a deliberate choice with a visible cost.
 	// tapelibrary_exporter_request_wait_seconds is what makes queueing
-	// visible rather than silent.
+	// visible rather than silent, and --exporter.max-queue-wait below is what
+	// bounds it without eating the request's own budget.
+	//
+	// **The default is 1, not 0, and that is not a preference.** R1.11.2's
+	// own "Query and task flow" notes require the response to a REST command
+	// to be retrieved before the next command is sent: the library serializes
+	// by construction. Measured against a real machine on 2026-08-03, ten
+	// concurrent requests took 9s in total against 12s issued one at a time —
+	// no useful gain — while per-request latency went from ~1s to as much as
+	// 8.2s. Concurrency here buys nothing and costs every collector its
+	// timeout, which is exactly what left all nineteen of them failing on the
+	// first run against real hardware.
 	maxRequestsPerTarget = kingpin.Flag(
 		"exporter.max-requests-per-target",
-		"Maximum concurrent requests this exporter issues per watched instance. 0 (default) means unlimited. Two instances sharing one physical address are bounded independently, not together.",
-	).Default("0").Int()
+		"Maximum concurrent requests this exporter issues per watched instance. Defaults to 1 because the TS4500 serializes REST commands internally (R1.11.2 requires each response to be retrieved before the next command), so concurrency measurably buys nothing and inflates per-request latency. 0 means unlimited. Two instances sharing one physical address are bounded independently, not together.",
+	).Default("1").Int()
+
+	// maxQueueWait bounds the wait for a request slot, separately from the
+	// per-collector request timeout that follows it. The split is what makes
+	// a ceiling of 1 usable at all: with nineteen collectors per library a
+	// queue is the normal state, and a collector's position in it has nothing
+	// to do with how long its own request needs. Before the two were split,
+	// a collector queued behind its siblings burned its whole 5s budget
+	// waiting and had nothing left for a one-second request — 14 of 19
+	// starved on every sweep, permanently, because same-interval tickers all
+	// fire together and the alignment never breaks up on its own.
+	//
+	// 15m rather than something tighter because ONE collector can legitimately
+	// hold the slot for a long time: /v1/dataCartridges measures over 600s on
+	// the reference fleet, and everything else queues behind it. A budget
+	// shorter than that would abandon healthy refreshes for a reason that is
+	// not their fault.
+	maxQueueWait = kingpin.Flag(
+		"exporter.max-queue-wait",
+		"How long a collector waits for its instance's request slot before abandoning the round. Separate from --collector.<name>.timeout, which bounds the request itself once a slot is held: with a concurrency ceiling of 1 a queue is normal, and charging the wait to the request budget starves collectors deep in the queue.",
+	).Default("15m").Duration()
 
 	// configFile is REQUIRED for this target model: without it there are no
 	// instances to watch. Its value is read straight from os.Args below, before
@@ -124,7 +154,7 @@ func main() {
 	var factories []instance.Factory
 
 	// @@INSTANCE_FACTORIES@@
-	exampleTimeout := kingpin.Flag("collector.example.timeout", "Per-request timeout for the example collector.").Default("5s").Duration()
+	exampleTimeout := kingpin.Flag("collector.example.timeout", "Per-request timeout for the example collector. Calibrated 2026-08-03 against real hardware: this endpoint measures under 2s idle, but /v1/library was observed once at 45s and the SCSI buffer path makes latency unpredictable from payload size. A generous ceiling costs nothing when the endpoint is fast and is the difference between a served cache and a permanently empty one.").Default("60s").Duration()
 	exampleInterval := kingpin.Flag("collector.example.interval", "Background refresh interval for the example collector.").Default("5m").Duration()
 	exampleEnabled := kingpin.Flag("collector.example", "Enable the example collector.").Default("true").Bool()
 	// The closure defers every flag dereference and the log reference to the
@@ -143,7 +173,7 @@ func main() {
 		},
 	})
 
-	libraryTimeout := kingpin.Flag("collector.library.timeout", "Per-request timeout for the library collector.").Default("5s").Duration()
+	libraryTimeout := kingpin.Flag("collector.library.timeout", "Per-request timeout for the library collector. Calibrated 2026-08-03 against real hardware: this endpoint measures under 2s idle, but /v1/library was observed once at 45s and the SCSI buffer path makes latency unpredictable from payload size. A generous ceiling costs nothing when the endpoint is fast and is the difference between a served cache and a permanently empty one.").Default("60s").Duration()
 	libraryInterval := kingpin.Flag("collector.library.interval", "Background refresh interval for the library collector.").Default("5m").Duration()
 	libraryEnabled := kingpin.Flag("collector.library", "Enable the library collector.").Default("true").Bool()
 	factories = append(factories, instance.Factory{
@@ -158,7 +188,7 @@ func main() {
 		},
 	})
 
-	framesTimeout := kingpin.Flag("collector.frames.timeout", "Per-request timeout for the frames collector.").Default("5s").Duration()
+	framesTimeout := kingpin.Flag("collector.frames.timeout", "Per-request timeout for the frames collector. Calibrated 2026-08-03 against real hardware: this endpoint measures under 2s idle, but /v1/library was observed once at 45s and the SCSI buffer path makes latency unpredictable from payload size. A generous ceiling costs nothing when the endpoint is fast and is the difference between a served cache and a permanently empty one.").Default("60s").Duration()
 	framesInterval := kingpin.Flag("collector.frames.interval", "Background refresh interval for the frames collector.").Default("5m").Duration()
 	framesEnabled := kingpin.Flag("collector.frames", "Enable the frames collector.").Default("true").Bool()
 	factories = append(factories, instance.Factory{
@@ -173,7 +203,7 @@ func main() {
 		},
 	})
 
-	accessorsTimeout := kingpin.Flag("collector.accessors.timeout", "Per-request timeout for the accessors collector.").Default("5s").Duration()
+	accessorsTimeout := kingpin.Flag("collector.accessors.timeout", "Per-request timeout for the accessors collector. Calibrated 2026-08-03 against real hardware: this endpoint measures under 2s idle, but /v1/library was observed once at 45s and the SCSI buffer path makes latency unpredictable from payload size. A generous ceiling costs nothing when the endpoint is fast and is the difference between a served cache and a permanently empty one.").Default("60s").Duration()
 	accessorsInterval := kingpin.Flag("collector.accessors.interval", "Background refresh interval for the accessors collector.").Default("5m").Duration()
 	accessorsEnabled := kingpin.Flag("collector.accessors", "Enable the accessors collector.").Default("true").Bool()
 	factories = append(factories, instance.Factory{
@@ -188,7 +218,7 @@ func main() {
 		},
 	})
 
-	drivesTimeout := kingpin.Flag("collector.drives.timeout", "Per-request timeout for the drives collector.").Default("5s").Duration()
+	drivesTimeout := kingpin.Flag("collector.drives.timeout", "Per-request timeout for the drives collector. Calibrated 2026-08-03 against real hardware: this endpoint measures under 2s idle, but /v1/library was observed once at 45s and the SCSI buffer path makes latency unpredictable from payload size. A generous ceiling costs nothing when the endpoint is fast and is the difference between a served cache and a permanently empty one.").Default("60s").Duration()
 	drivesInterval := kingpin.Flag("collector.drives.interval", "Background refresh interval for the drives collector.").Default("5m").Duration()
 	drivesEnabled := kingpin.Flag("collector.drives", "Enable the drives collector.").Default("true").Bool()
 	// Default false, and the reason is Prometheus's index rather than this
@@ -208,7 +238,7 @@ func main() {
 		},
 	})
 
-	powerSuppliesTimeout := kingpin.Flag("collector.power_supplies.timeout", "Per-request timeout for the power_supplies collector.").Default("5s").Duration()
+	powerSuppliesTimeout := kingpin.Flag("collector.power_supplies.timeout", "Per-request timeout for the power_supplies collector. Calibrated 2026-08-03 against real hardware: this endpoint measures under 2s idle, but /v1/library was observed once at 45s and the SCSI buffer path makes latency unpredictable from payload size. A generous ceiling costs nothing when the endpoint is fast and is the difference between a served cache and a permanently empty one.").Default("60s").Duration()
 	powerSuppliesInterval := kingpin.Flag("collector.power_supplies.interval", "Background refresh interval for the power_supplies collector.").Default("5m").Duration()
 	powerSuppliesEnabled := kingpin.Flag("collector.power_supplies", "Enable the power_supplies collector.").Default("true").Bool()
 	factories = append(factories, instance.Factory{
@@ -223,7 +253,7 @@ func main() {
 		},
 	})
 
-	nodeCardsTimeout := kingpin.Flag("collector.node_cards.timeout", "Per-request timeout for the node_cards collector.").Default("5s").Duration()
+	nodeCardsTimeout := kingpin.Flag("collector.node_cards.timeout", "Per-request timeout for the node_cards collector. Calibrated 2026-08-03 against real hardware: this endpoint measures under 2s idle, but /v1/library was observed once at 45s and the SCSI buffer path makes latency unpredictable from payload size. A generous ceiling costs nothing when the endpoint is fast and is the difference between a served cache and a permanently empty one.").Default("60s").Duration()
 	nodeCardsInterval := kingpin.Flag("collector.node_cards.interval", "Background refresh interval for the node_cards collector.").Default("5m").Duration()
 	nodeCardsEnabled := kingpin.Flag("collector.node_cards", "Enable the node_cards collector.").Default("true").Bool()
 	factories = append(factories, instance.Factory{
@@ -238,7 +268,7 @@ func main() {
 		},
 	})
 
-	ioStationsTimeout := kingpin.Flag("collector.io_stations.timeout", "Per-request timeout for the io_stations collector.").Default("5s").Duration()
+	ioStationsTimeout := kingpin.Flag("collector.io_stations.timeout", "Per-request timeout for the io_stations collector. Calibrated 2026-08-03 against real hardware: this endpoint measures under 2s idle, but /v1/library was observed once at 45s and the SCSI buffer path makes latency unpredictable from payload size. A generous ceiling costs nothing when the endpoint is fast and is the difference between a served cache and a permanently empty one.").Default("60s").Duration()
 	ioStationsInterval := kingpin.Flag("collector.io_stations.interval", "Background refresh interval for the io_stations collector.").Default("5m").Duration()
 	ioStationsEnabled := kingpin.Flag("collector.io_stations", "Enable the io_stations collector.").Default("true").Bool()
 	factories = append(factories, instance.Factory{
@@ -253,7 +283,7 @@ func main() {
 		},
 	})
 
-	fcPortsTimeout := kingpin.Flag("collector.fc_ports.timeout", "Per-request timeout for the fc_ports collector.").Default("5s").Duration()
+	fcPortsTimeout := kingpin.Flag("collector.fc_ports.timeout", "Per-request timeout for the fc_ports collector. Calibrated 2026-08-03 against real hardware: this endpoint measures under 2s idle, but /v1/library was observed once at 45s and the SCSI buffer path makes latency unpredictable from payload size. A generous ceiling costs nothing when the endpoint is fast and is the difference between a served cache and a permanently empty one.").Default("60s").Duration()
 	fcPortsInterval := kingpin.Flag("collector.fc_ports.interval", "Background refresh interval for the fc_ports collector.").Default("5m").Duration()
 	fcPortsEnabled := kingpin.Flag("collector.fc_ports", "Enable the fc_ports collector.").Default("true").Bool()
 	factories = append(factories, instance.Factory{
@@ -268,7 +298,7 @@ func main() {
 		},
 	})
 
-	logicalLibrariesTimeout := kingpin.Flag("collector.logical_libraries.timeout", "Per-request timeout for the logical_libraries collector.").Default("5s").Duration()
+	logicalLibrariesTimeout := kingpin.Flag("collector.logical_libraries.timeout", "Per-request timeout for the logical_libraries collector. Calibrated 2026-08-03 against real hardware: this endpoint measures under 2s idle, but /v1/library was observed once at 45s and the SCSI buffer path makes latency unpredictable from payload size. A generous ceiling costs nothing when the endpoint is fast and is the difference between a served cache and a permanently empty one.").Default("60s").Duration()
 	logicalLibrariesInterval := kingpin.Flag("collector.logical_libraries.interval", "Background refresh interval for the logical_libraries collector.").Default("5m").Duration()
 	logicalLibrariesEnabled := kingpin.Flag("collector.logical_libraries", "Enable the logical_libraries collector.").Default("true").Bool()
 	factories = append(factories, instance.Factory{
@@ -283,7 +313,7 @@ func main() {
 		},
 	})
 
-	cleaningCartridgesTimeout := kingpin.Flag("collector.cleaning_cartridges.timeout", "Per-request timeout for the cleaning_cartridges collector.").Default("5s").Duration()
+	cleaningCartridgesTimeout := kingpin.Flag("collector.cleaning_cartridges.timeout", "Per-request timeout for the cleaning_cartridges collector. Calibrated 2026-08-03 against real hardware: this endpoint measures under 2s idle, but /v1/library was observed once at 45s and the SCSI buffer path makes latency unpredictable from payload size. A generous ceiling costs nothing when the endpoint is fast and is the difference between a served cache and a permanently empty one.").Default("60s").Duration()
 	cleaningCartridgesInterval := kingpin.Flag("collector.cleaning_cartridges.interval", "Background refresh interval for the cleaning_cartridges collector.").Default("5m").Duration()
 	cleaningCartridgesEnabled := kingpin.Flag("collector.cleaning_cartridges", "Enable the cleaning_cartridges collector.").Default("true").Bool()
 	// Default TRUE, the inverse of --collector.drives.per-volser, and the only
@@ -323,8 +353,8 @@ func main() {
 	// hours, not seconds, and nothing here is worth a minute of queueing every
 	// five. That delay stays observable rather than hidden, through
 	// tapelibrary_exporter_request_wait_seconds.
-	dataCartridgesTimeout := kingpin.Flag("collector.data_cartridges.timeout", "Per-request timeout for the data_cartridges collector. Defaults higher than every other collector: this endpoint returns the library's entire cartridge inventory unpaginated over a slow path.").Default("60s").Duration()
-	dataCartridgesInterval := kingpin.Flag("collector.data_cartridges.interval", "Background refresh interval for the data_cartridges collector. Defaults longer than every other collector: a refresh holds the library's single request slot for as long as it runs, and a cartridge inventory does not turn over in minutes.").Default("15m").Duration()
+	dataCartridgesTimeout := kingpin.Flag("collector.data_cartridges.timeout", "Per-request timeout for the data_cartridges collector. Defaults higher than every other collector: this endpoint returns the library's entire cartridge inventory unpaginated over a slow path. Measured over 600s on the reference fleet: the previous 60s could never complete, so this collector had never once succeeded against real hardware.").Default("900s").Duration()
+	dataCartridgesInterval := kingpin.Flag("collector.data_cartridges.interval", "Background refresh interval for the data_cartridges collector. Defaults longer than every other collector: a refresh holds the library's single request slot for as long as it runs, and a cartridge inventory does not turn over in minutes. Raised from 15m to 1h on 2026-08-03: with a concurrency ceiling of 1 this endpoint alone holds the library's only request slot for several minutes per refresh, and the two heavy cartridge collectors together needed more than a 15m cycle, starving every sibling.").Default("1h").Duration()
 	dataCartridgesEnabled := kingpin.Flag("collector.data_cartridges", "Enable the data_cartridges collector.").Default("true").Bool()
 	// Default FALSE, matching --collector.drives.per-volser and inverting
 	// --collector.cleaning_cartridges.per-volser. The population is bounded by
@@ -365,7 +395,7 @@ func main() {
 	// open question that per-endpoint cadences were never calibrated on this
 	// fleet; these are sized against the capture, and are the operator's to
 	// adjust once somebody times a real refresh.
-	slotsTimeout := kingpin.Flag("collector.slots.timeout", "Per-request timeout for the slots collector. Defaults higher than most collectors: this endpoint returns the library's entire slot inventory unpaginated over a slow path.").Default("30s").Duration()
+	slotsTimeout := kingpin.Flag("collector.slots.timeout", "Per-request timeout for the slots collector. Defaults higher than most collectors: this endpoint returns the library's entire slot inventory unpaginated over a slow path. Measured 23.7s for 646 KB on the reference fleet, which left the previous 30s with almost no margin.").Default("180s").Duration()
 	slotsInterval := kingpin.Flag("collector.slots.interval", "Background refresh interval for the slots collector. Defaults longer than most collectors: a refresh holds the library's single request slot for as long as it runs, and slot occupancy turns over at the same rate as the cartridge inventory.").Default("15m").Duration()
 	slotsEnabled := kingpin.Flag("collector.slots", "Enable the slots collector.").Default("true").Bool()
 	// Default FALSE, matching --collector.data_cartridges.per-volser. The
@@ -395,7 +425,7 @@ func main() {
 	// below, GET /v1/events returns the handful of entries the library raised
 	// in the last hour — 42 over a 3h45m span in the 2026-07-28 capture — so it
 	// is one of the cheapest endpoints here, not one of the heaviest.
-	eventsTimeout := kingpin.Flag("collector.events.timeout", "Per-request timeout for the events collector.").Default("5s").Duration()
+	eventsTimeout := kingpin.Flag("collector.events.timeout", "Per-request timeout for the events collector. Measured 58s unbounded on the reference fleet; the exporter narrows the window with --collector.events.lookback, so its real cost is lower, but the endpoint returns megabytes and 5s could never cover it.").Default("120s").Duration()
 	eventsInterval := kingpin.Flag("collector.events.interval", "Background refresh interval for the events collector.").Default("5m").Duration()
 	eventsEnabled := kingpin.Flag("collector.events", "Enable the events collector.").Default("true").Bool()
 	// Not a tuning knob: without it this collector is unusable. R1.11.2 states
@@ -456,8 +486,8 @@ func main() {
 	// open question that per-endpoint cadences were never calibrated on this
 	// fleet; these are sized against the capture, and are the operator's to
 	// adjust once somebody times a real refresh.
-	dataCartridgesLifetimeTimeout := kingpin.Flag("collector.data_cartridges_lifetime.timeout", "Per-request timeout for the data_cartridges_lifetime collector. Defaults as high as the data_cartridges collector: this endpoint walks the library's entire cartridge inventory unpaginated over the same slow path, reading each cartridge's own memory.").Default("60s").Duration()
-	dataCartridgesLifetimeInterval := kingpin.Flag("collector.data_cartridges_lifetime.interval", "Background refresh interval for the data_cartridges_lifetime collector. Defaults as long as the data_cartridges collector: a refresh holds the library's single request slot for as long as it runs, and lifetime counters move slower than the inventory itself.").Default("15m").Duration()
+	dataCartridgesLifetimeTimeout := kingpin.Flag("collector.data_cartridges_lifetime.timeout", "Per-request timeout for the data_cartridges_lifetime collector. Defaults as high as the data_cartridges collector: this endpoint walks the library's entire cartridge inventory unpaginated over the same slow path, reading each cartridge's own memory. Measured 343.9s for 2.35 MB on the reference fleet: the previous 60s could never complete, so this collector had never once succeeded against real hardware.").Default("900s").Duration()
+	dataCartridgesLifetimeInterval := kingpin.Flag("collector.data_cartridges_lifetime.interval", "Background refresh interval for the data_cartridges_lifetime collector. Defaults as long as the data_cartridges collector: a refresh holds the library's single request slot for as long as it runs, and lifetime counters move slower than the inventory itself. Raised from 15m to 1h on 2026-08-03: with a concurrency ceiling of 1 this endpoint alone holds the library's only request slot for several minutes per refresh, and the two heavy cartridge collectors together needed more than a 15m cycle, starving every sibling.").Default("1h").Duration()
 	dataCartridgesLifetimeEnabled := kingpin.Flag("collector.data_cartridges_lifetime", "Enable the data_cartridges_lifetime collector.").Default("true").Bool()
 	// Default FALSE, matching --collector.data_cartridges.per-volser and
 	// --collector.slots.per-slot. This is the largest per-object cost in the
@@ -489,7 +519,7 @@ func main() {
 	//
 	// The timeout stays at the 5s default: the response is the last week of
 	// hourly entries, ~67 KB, and needs no inventory walk.
-	reportsLibraryTimeout := kingpin.Flag("collector.reports_library.timeout", "Per-request timeout for the reports_library collector.").Default("5s").Duration()
+	reportsLibraryTimeout := kingpin.Flag("collector.reports_library.timeout", "Per-request timeout for the reports_library collector. Calibrated 2026-08-03 against real hardware: this endpoint measures under 2s idle, but /v1/library was observed once at 45s and the SCSI buffer path makes latency unpredictable from payload size. A generous ceiling costs nothing when the endpoint is fast and is the difference between a served cache and a permanently empty one.").Default("60s").Duration()
 	reportsLibraryInterval := kingpin.Flag("collector.reports_library.interval", "Background refresh interval for the reports_library collector. Defaults to a quarter of the endpoint's own hourly cadence: R1.11.2 publishes one report per completed hour, so polling faster returns the same window again.").Default("15m").Duration()
 	reportsLibraryEnabled := kingpin.Flag("collector.reports_library", "Enable the reports_library collector.").Default("true").Bool()
 	factories = append(factories, instance.Factory{
@@ -523,7 +553,7 @@ func main() {
 	// The timeout is 60s for the same reason it is on data_cartridges and
 	// data_cartridges_lifetime: 3.3 MB over the LCC-backed path is not a 5s
 	// request.
-	reportsDrivesTimeout := kingpin.Flag("collector.reports_drives.timeout", "Per-request timeout for the reports_drives collector. Higher than most collectors: the endpoint returns a week of hourly windows for every drive, ~3.3 MB on a 40-drive library.").Default("60s").Duration()
+	reportsDrivesTimeout := kingpin.Flag("collector.reports_drives.timeout", "Per-request timeout for the reports_drives collector. Higher than most collectors: the endpoint returns a week of hourly windows for every drive, ~3.3 MB on a 40-drive library. Measured 49.8s for 2.9 MB on the reference fleet, which left the previous 60s with almost no margin.").Default("180s").Duration()
 	reportsDrivesInterval := kingpin.Flag("collector.reports_drives.interval", "Background refresh interval for the reports_drives collector. Defaults to the endpoint's own hourly cadence: R1.11.2 publishes one report per drive per completed hour, so polling faster re-transfers the same windows.").Default("1h").Duration()
 	reportsDrivesEnabled := kingpin.Flag("collector.reports_drives", "Enable the reports_drives collector.").Default("true").Bool()
 	factories = append(factories, instance.Factory{
@@ -585,7 +615,7 @@ func main() {
 	// only the per-cartridge series can name WHICH cartridge to pull. The
 	// library-wide aggregates every alert reads are emitted regardless, so
 	// turning it off costs detail and never coverage.
-	diagnosticCartridgesTimeout := kingpin.Flag("collector.diagnostic_cartridges.timeout", "Per-request timeout for the diagnostic_cartridges collector.").Default("5s").Duration()
+	diagnosticCartridgesTimeout := kingpin.Flag("collector.diagnostic_cartridges.timeout", "Per-request timeout for the diagnostic_cartridges collector. Calibrated 2026-08-03 against real hardware: this endpoint measures under 2s idle, but /v1/library was observed once at 45s and the SCSI buffer path makes latency unpredictable from payload size. A generous ceiling costs nothing when the endpoint is fast and is the difference between a served cache and a permanently empty one.").Default("60s").Duration()
 	diagnosticCartridgesInterval := kingpin.Flag("collector.diagnostic_cartridges.interval", "Background refresh interval for the diagnostic_cartridges collector. The population changes only when somebody loads or removes a cartridge, so this is deliberately unhurried.").Default("5m").Duration()
 	diagnosticCartridgesPerVolser := kingpin.Flag("collector.diagnostic_cartridges.per-volser", "Emit tapelibrary_diagnostic_cartridge_info, tapelibrary_diagnostic_cartridge_last_usage_timestamp_seconds and tapelibrary_diagnostic_cartridge_lifetime_remaining_ratio, one set per diagnostic cartridge. On by default: the population is bounded by service policy rather than library capacity (five on the reference fleet), and only the per-cartridge series can name which cartridge to pull. The library-wide aggregates the alerts read are emitted regardless.").Default("true").Bool()
 	diagnosticCartridgesEnabled := kingpin.Flag("collector.diagnostic_cartridges", "Enable the diagnostic_cartridges collector.").Default("true").Bool()
@@ -680,7 +710,7 @@ func main() {
 	// documented meaning for 0). Each Handle Prepare builds gets its own
 	// Limiter from this same ceiling, so an instance added by a later reload
 	// is covered too, without anything having to be pre-populated.
-	registry := instance.NewRegistry(log, reg, instanceLabel, enabled, *maxRequestsPerTarget)
+	registry := instance.NewRegistry(log, reg, instanceLabel, enabled, *maxRequestsPerTarget, *maxQueueWait)
 	plan, err := registry.Prepare(instances)
 	if err != nil {
 		// A transport that cannot be built (unreadable CA or secret file) is a
