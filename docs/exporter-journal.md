@@ -2061,6 +2061,28 @@ library, so it exercises perhaps a third of the enumerated states.
   **`promtool` is still absent**; rules were validated as in previous sessions by
   parsing every expression through `prometheus/promql/parser` v0.313.2 — **62 rules,
   0 failures**, the 60 recorded above plus these two.
+- 2026-08-03 **first contact with a real library** (same session), through an SSH
+  SOCKS5 tunnel the maintainer opened on `127.0.0.1:5454`.
+  `library1.example.internal` (192.0.2.10) answers `/web/api/v1/library` with
+  `401`, so the RoE endpoint and the path prefix in `## Scaffold inputs` are both
+  confirmed against the hardware rather than against the manual alone. No
+  authenticated request was made: the monitoring account's credentials were not
+  supplied, so **no metric has yet been observed coming off a real machine** and
+  every figure in `## Cardinality budget` remains fixture-derived.
+  This settled the TLS question in `## Open questions` and falsified the
+  instruction written there; `config.example.yml` was corrected the same day. The
+  transferable lesson is the probing method, not the verdict: **`curl -k` is not a
+  valid check for a Go client's TLS**, because OpenSSL still honours a certificate's
+  Common Name and Go has not since 1.15. The certificate here verifies under `curl`
+  and under no Go configuration at all, so the probe was rewritten against
+  `crypto/tls` directly. Apply the same rule to any future trust question on this
+  fleet.
+  **Note for the next session: `proxychains` does not work with this exporter**, and
+  the failure is silent rather than an error. It hooks libc's `connect()` through
+  `LD_PRELOAD`, and the Go runtime issues its syscalls directly, so a Go binary
+  ignores it and dials out unproxied. Use `http_client_config.proxy_url`
+  (`prometheus/common` exposes the full `ProxyConfig`, and `net/http` speaks
+  `socks5`/`socks5h` natively) or an `ssh -L` port forward instead.
 
 ## Open questions / assumptions
 
@@ -2398,6 +2420,42 @@ library, so it exercises perhaps a third of the enumerated states.
   whether they present a self-signed certificate or one issued by an internal CA is
   unverified. `config.example.yml` should demonstrate `ca_file` rather than
   `insecure_skip_verify`; confirm which the fleet actually needs.
+  - **Resolved 2026-08-03 against the real hardware, and the answer is NEITHER of
+    the two this note anticipated.** `library1.example.internal` (192.0.2.10) was
+    reached through an SSH SOCKS5 tunnel and its certificate read with Go's own TLS
+    stack rather than with `curl`, which matters for the reason below. It is the
+    **IBM factory certificate**: self-signed (subject == issuer,
+    `CN=ibm.com,OU=STG,O=International Business Machines Corp.M,L=Tucson,ST=Arizona,C=US`),
+    `isCA: true`, valid to 2034-03-19, and carrying **no subjectAltName at all** —
+    neither DNS nor IP. Not an internal CA, and not merely self-signed either: the
+    missing SAN is what decides this.
+    **`ca_file` cannot work, and neither can any `server_name`.** Go has ignored the
+    Common Name since 1.15 and removed the fallback in 1.17, so all three forms fail
+    against this certificate:
+    `server_name: library1.example.internal` gives
+    `x509: certificate is not valid for any names`; `server_name: ibm.com` gives
+    `x509: certificate relies on legacy Common Name field, use SANs instead`; and
+    omitting `server_name` reproduces the first. Pinning the certificate as the trust
+    root fixes CHAIN validation, which was never what was failing — it is NAME
+    validation, and no CA file can supply a SAN the certificate does not contain.
+    `curl -k` succeeds here and is therefore actively misleading as a check: OpenSSL
+    still honours the CN, Go does not, so a probe with `curl` would have "confirmed"
+    a configuration the exporter cannot use.
+    **`insecure_skip_verify: true` is therefore forced rather than preferred**, and
+    `config.example.yml` was corrected the same day to demonstrate it, with the
+    accepted risk stated in place (encrypted but unauthenticated: anything able to
+    intercept the path can present its own certificate and read the monitoring
+    account's credentials) and the verifying block kept beside it for the day the
+    input changes. **This note's original instruction is thus recorded as falsified,
+    not quietly dropped**: it assumed the choice was between two trust models, when
+    the real constraint was a certificate that no Go client can name-verify at all.
+    **The clean fix is on the library, not in this repository**: reissue the
+    certificate with a proper subjectAltName from the TS4500 GUI (Settings →
+    Security → Certificates), then switch to the `ca_file`/`server_name` block. Until
+    someone does that on all five machines, every instance runs
+    `insecure_skip_verify`. Worth raising with whoever owns the libraries, since it
+    is a five-minute change per machine that turns an accepted risk back into a
+    verified connection.
 - **Report windows carry their own timestamp, which will not be honoured.**
   `/v1/reports/*` returns several one-hour windows, each with its own `time`. The
   design exposes only the newest complete window, as a Gauge, at scrape time — no
