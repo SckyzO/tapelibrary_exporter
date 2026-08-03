@@ -1626,6 +1626,76 @@ groups:
       # for the reason its two siblings' counterparts do not.
 
       # ──────────────────────────────────────────────────────────────────
+      # Business: DiagnosticCartridgesCollector (added via /add-collector)
+      # ──────────────────────────────────────────────────────────────────
+      # A diagnostic cartridge is never read or written by a host, so the
+      # only question worth paging on is availability — and it is invisible
+      # until the day a service action needs one and finds none usable. By
+      # then the fix is ordering media, which is a lead time rather than a
+      # repair, so this is deliberately a warning that fires early rather
+      # than a critical that fires late.
+      #
+      # It reads the USABLE count, not the state count, and that is
+      # load-bearing: a cartridge whose state is normal but which the
+      # accessor cannot reach is one the library cannot select. The state
+      # count would report a healthy supply in exactly the situation where
+      # nothing can be picked up. It is also emitted regardless of
+      # --collector.diagnostic_cartridges.per-volser, so a site that turns
+      # the per-cartridge detail off keeps this rule working — the same
+      # reason CleaningCartridgesLow reads a library-wide aggregate rather
+      # than sum()-ing the per-volser series.
+      #
+      # **The thresholds are re-derived defaults with no grounding in
+      # R1.11.2**, which specifies no minimum diagnostic stock at all, and
+      # they are flagged as such the way LibraryReportNoMounts and
+      # DiagnosticCartridges' own siblings are. What IS grounded is their
+      # position relative to the reference fleet, which holds five: 2 leaves
+      # a working margin for a service action needing more than one, and 0 is
+      # not a threshold at all but the statement that the next service action
+      # requiring media is already blocked. Adjust 2 against how many
+      # cartridges your own service procedures consume at once.
+      #
+      # 6h of `for` on both tiers. This is a supply level with days or weeks
+      # of runway, not a fault, so anything shorter would only page on a
+      # scrape gap or on the minutes an engineer spends with a cartridge in
+      # hand during a service action — exactly the moment the count
+      # legitimately dips and nobody should be woken.
+      - alert: DiagnosticCartridgesLow
+        expr: tapelibrary_diagnostic_cartridges_usable < 2
+        for: 6h
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter library {{ $labels.library }} is low on usable diagnostic cartridges'
+          description: 'Library {{ $labels.library }} has {{ $value }} usable diagnostic cartridge(s) left, sustained for 6 hours. Usable means state normal AND reachable by the accessor, so compare against tapelibrary_diagnostic_cartridges{state="normal"} and tapelibrary_diagnostic_cartridges_access: if the state count is healthy and this is not, a cartridge is stuck behind a blocking position rather than spent. Ordering media is a lead time, not a repair, so act on this before it reaches zero.'
+
+      - alert: DiagnosticCartridgesExhausted
+        expr: tapelibrary_diagnostic_cartridges_usable == 0
+        for: 6h
+        labels:
+          severity: critical
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter library {{ $labels.library }} has no usable diagnostic cartridge'
+          description: 'Library {{ $labels.library }} cannot select any diagnostic cartridge for a service action: the next one requiring media will be blocked. This is not a threshold, it is the condition itself. Check tapelibrary_diagnostic_cartridges by state — atEndOfLife means the stock is spent and needs ordering, while a healthy normal count alongside this means the cartridges are present but unreachable, which tapelibrary_diagnostic_cartridges_access and tapelibrary_accessor_state will explain. A library with no diagnostic cartridge loaded at all reports zero here too, and that reads the same way on purpose: the library cannot diagnose itself either way.'
+
+      # No rule ships on tapelibrary_diagnostic_cartridge_lifetime_remaining_ratio,
+      # and the omission is forced by the data rather than chosen. Three of
+      # the five cartridges in the reference capture report no remaining-life
+      # reading at all, so a threshold over that metric would silently cover
+      # two cartridges out of five while looking like it covered the fleet.
+      # atEndOfLife is the state the library itself assigns when a cartridge
+      # is spent, and DiagnosticCartridgesLow already reads the consequence
+      # of that through the usable count.
+      #
+      # Nothing ships on the last-usage timestamp either, for the reason its
+      # cleaning-cartridge counterpart carries no rule: nobody has measured
+      # how long a healthy diagnostic cartridge legitimately sits between
+      # service actions, and inventing a number would page on a library that
+      # simply has not needed servicing.
+
+      # ──────────────────────────────────────────────────────────────────
       # Health: collector freshness (every background collector)
       # ──────────────────────────────────────────────────────────────────
       # These two read the freshness gauge every background collector emits,

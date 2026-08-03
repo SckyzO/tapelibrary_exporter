@@ -1203,6 +1203,79 @@ clock-skew reason its siblings document.
 | `tapelibrary_accessor_report_window_duration_seconds` | Gauge | `location` | Number of seconds this accessor's reporting window covers, as the library reports it. 3600 on every window in the reference capture. Exposed so that a window covering less than a full hour is visible rather than assumed away: its activity figures would be proportionally low through no fault of the accessor. |
 | `tapelibrary_accessor_report_last_refresh_timestamp_seconds` | Gauge | - | Unix time of the last successful reports/accessors refresh. Alert if time() minus this exceeds 2x the collector's configured interval. Named for this collector's metric subsystem rather than its registered name, so a subsystem sweep finds the freshness of the data it is reading. Distinct from `tapelibrary_accessor_report_window_timestamp_seconds`, which ages even while this one stays current. |
 
+## DiagnosticCartridgesCollector
+
+Defined in `internal/collector/diagnostic_cartridges.go`, the background-refresh
+variant: a goroutine polls `GET /v1/diagnosticCartridges` on
+`--collector.diagnostic_cartridges.interval` and every scrape serves the last
+cached result.
+
+**What it exists to answer is "can the library still diagnose itself".** A
+diagnostic cartridge is never read or written by a host, so none of the
+throughput or media-error questions the data-cartridge collectors ask apply
+here. The one that does is availability, and it is invisible until the day a
+service action needs a cartridge and finds none usable — at which point the fix
+is ordering media, not something an engineer on site can do.
+`tapelibrary_diagnostic_cartridges_usable` is that signal.
+
+**`usable` is deliberately narrower than the `normal` state count.** A
+cartridge whose state is `normal` but which the accessor cannot reach
+(`accessible` reading `no`) is one the library cannot select, so it is excluded.
+Reading the state count alone would report a healthy supply in exactly the
+situation where nothing can be picked up.
+
+**The full stateset is affordable here and is not a precedent.** Five cartridges
+against R1.11.2's five documented states costs 25 series, so the state count is
+emitted per state library-wide rather than collapsed. `DataCartridgesCollector`
+carries the active state as a label on its `_info` instead, because the same
+shape over 9 749 cartridges would cost tens of thousands of series. The rule is
+in `docs/exporter-journal.md`'s cardinality budget: full statesets where objects
+number in the tens, active-state-only where they number in the thousands.
+
+**`volser` is emitted by default**, making this the second collector to do so
+after `CleaningCartridgesCollector`, on the same justification rather than a new
+one: the population is bounded by service policy rather than by library
+capacity, and at five cartridges the argument is stronger than where it was
+first made. `--collector.diagnostic_cartridges.per-volser` turns the three
+per-cartridge families off; every library-wide aggregate an alert reads is
+emitted regardless, so the flag costs the ability to name *which* cartridge to
+pull and nothing else.
+
+**Most of these cartridges report no cartridge memory at all.** Three of the
+five in the reference capture return `null` for `type`, `vendor`, `sn`, `worm`,
+`format` and `lifetimeRemaining` simultaneously, while still reporting volser,
+state, accessible, location and mediaType. That is the same pattern
+`DataCartridgesCollector` documents, handled the same way: a nullable **label**
+takes the literal token `unknown`, and a nullable **measurement** emits no
+series at all. `tapelibrary_diagnostic_cartridges_lifetime_unknown` counts the
+second case, so the remaining-life series are read as covering a subset rather
+than the whole population. The token is deliberately not applied to `state`,
+whose documented set already contains `unknown`.
+
+**An empty response is a real reading of zero, not an error**, and this is the
+one place this collector parts company with its cartridge siblings. A library
+with no data cartridge cannot serve a host and one with no cleaning cartridge
+cannot clean a drive, so both of those reject an empty array as a response that
+lost its content. A library with no diagnostic cartridge is merely one nobody
+has loaded a cartridge into — and zero is exactly what the exhaustion alert has
+to be able to see.
+
+`volser` is not a unique key on this endpoint any more than on the others: the
+key is the `volser` + `location` pair, and the parser rejects a duplicate of the
+pair. `internalAddress`, R1.11.2's nominated tie-breaker, stays off the wire
+because the manual documents it as changing whenever a cartridge moves.
+
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `tapelibrary_diagnostic_cartridges` | Gauge | `state` | Number of diagnostic cartridges in each state, as a stateset over R1.11.2's five documented values plus any value actually observed. Always emitted, independently of `--collector.diagnostic_cartridges.per-volser`. Summing across state gives the library's whole diagnostic population. |
+| `tapelibrary_diagnostic_cartridges_access` | Gauge | `access` | Number of diagnostic cartridges the accessor can reach, by access level. A cartridge behind a blocking position reads `limited` or `no` while its state stays `normal`, so this is a different question from the state count above and both are needed to explain a low usable figure. |
+| `tapelibrary_diagnostic_cartridges_usable` | Gauge | - | Number of diagnostic cartridges the library could actually select for a service action right now: state `normal` AND reachable by the accessor. Deliberately narrower than the normal state count, because a cartridge the robot cannot reach is one it cannot use. Reaching 0 means the next service action requiring media will be blocked, and is what `DiagnosticCartridgesExhausted` reads. Always emitted, independently of the per-volser flag. |
+| `tapelibrary_diagnostic_cartridges_lifetime_unknown` | Gauge | - | Number of diagnostic cartridges reporting no remaining-life reading at all, because the library has not read their cartridge memory. Three of the five in the reference capture, so a high value here is the ordinary state of this endpoint rather than a fault: it is published so that the remaining-life series below are read as covering a subset, never as covering the whole population. |
+| `tapelibrary_diagnostic_cartridge_info` | Gauge | `volser`, `location`, `state`, `media_type`, `cartridge_type`, `access`, `worm` | Always 1. Carries this diagnostic cartridge's current state and identity as labels, joinable to the per-cartridge measurements on volser and location. Labels the library did not read carry the literal token `unknown` rather than an empty string. Emitted only when `--collector.diagnostic_cartridges.per-volser` is set. |
+| `tapelibrary_diagnostic_cartridge_last_usage_timestamp_seconds` | Gauge | `volser`, `location` | Unix time this diagnostic cartridge was last mounted. Absent, never zero, when the library reports no usage timestamp or one that cannot be parsed: a 0 here would place the mount at the Unix epoch and quietly corrupt every query asking what has been used recently. Emitted only when `--collector.diagnostic_cartridges.per-volser` is set. |
+| `tapelibrary_diagnostic_cartridge_lifetime_remaining_ratio` | Gauge | `volser`, `location` | Estimated media life left on this diagnostic cartridge, as a ratio from 0 to 1 (the API reports a 0-100 percentage). Absent, never zero, for a cartridge whose memory the library has not read, which is the majority case on this endpoint: a 0 would read as a cartridge at end of life. Count the absent ones with `tapelibrary_diagnostic_cartridges_lifetime_unknown`. Emitted only when `--collector.diagnostic_cartridges.per-volser` is set. |
+| `tapelibrary_diagnostic_cartridges_last_refresh_timestamp_seconds` | Gauge | - | Unix time of the last successful diagnostic cartridges refresh. Alert if time() minus this exceeds 2x the collector's configured interval; `CollectorNeverRefreshed` and `CollectorRefreshStale` already do. |
+
 ## Self-instrumentation
 
 Always registered on this target model, with no `--collector.*` flag gating

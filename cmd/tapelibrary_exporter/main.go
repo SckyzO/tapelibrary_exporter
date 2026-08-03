@@ -573,6 +573,34 @@ func main() {
 		},
 	})
 
+	// diagnostic_cartridges keeps the shared 5s/5m defaults: the endpoint
+	// returns one entry per diagnostic cartridge, five on the reference
+	// fleet, and the population changes only when somebody physically loads
+	// or removes one.
+	//
+	// --collector.diagnostic_cartridges.per-volser defaults TRUE, making this
+	// the second collector after cleaning_cartridges to emit volser without
+	// being asked. Same justification, applied to a smaller population: the
+	// count is bounded by service policy rather than by library capacity, and
+	// only the per-cartridge series can name WHICH cartridge to pull. The
+	// library-wide aggregates every alert reads are emitted regardless, so
+	// turning it off costs detail and never coverage.
+	diagnosticCartridgesTimeout := kingpin.Flag("collector.diagnostic_cartridges.timeout", "Per-request timeout for the diagnostic_cartridges collector.").Default("5s").Duration()
+	diagnosticCartridgesInterval := kingpin.Flag("collector.diagnostic_cartridges.interval", "Background refresh interval for the diagnostic_cartridges collector. The population changes only when somebody loads or removes a cartridge, so this is deliberately unhurried.").Default("5m").Duration()
+	diagnosticCartridgesPerVolser := kingpin.Flag("collector.diagnostic_cartridges.per-volser", "Emit tapelibrary_diagnostic_cartridge_info, tapelibrary_diagnostic_cartridge_last_usage_timestamp_seconds and tapelibrary_diagnostic_cartridge_lifetime_remaining_ratio, one set per diagnostic cartridge. On by default: the population is bounded by service policy rather than library capacity (five on the reference fleet), and only the per-cartridge series can name which cartridge to pull. The library-wide aggregates the alerts read are emitted regardless.").Default("true").Bool()
+	diagnosticCartridgesEnabled := kingpin.Flag("collector.diagnostic_cartridges", "Enable the diagnostic_cartridges collector.").Default("true").Bool()
+	factories = append(factories, instance.Factory{
+		Name:    "diagnostic_cartridges",
+		Enabled: diagnosticCartridgesEnabled,
+		New: func(h *instance.Handle) (instance.BackgroundCollector, error) {
+			c, err := h.ClientFor(*diagnosticCartridgesTimeout)
+			if err != nil {
+				return nil, err
+			}
+			return collector.NewDiagnosticCartridgesCollector(log, c, *diagnosticCartridgesInterval, *diagnosticCartridgesPerVolser), nil
+		},
+	})
+
 	kingpin.Version(version.Print("tapelibrary_exporter"))
 	kingpin.HelpFlag.Short('h')
 

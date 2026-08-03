@@ -853,7 +853,25 @@ variant** — `multi-instance` admits no other.
       `/v1/accessors` does. All six ship anyway, absent-never-zero, so hardware that
       does report them needs no code change; the test triad pins both halves rather
       than leaving the dead branch untested.
-- [ ] `diagnostic_cartridges`  background  `GET /v1/diagnosticCartridges`
+- [x] `diagnostic_cartridges`  background  built 2026-08-03 — `GET /v1/diagnosticCartridges`.
+      **The last of the nineteen, and the only collector whose empty response is a
+      valid reading rather than an error.** Every other cartridge endpoint rejects an
+      empty array as a response that lost its content — a library with no data
+      cartridge cannot serve a host, one with no cleaning cartridge cannot clean a
+      drive. A library with no diagnostic cartridge is merely one nobody has loaded
+      one into, and rejecting that would replace a true zero with a stale cache, in
+      exactly the case `DiagnosticCartridgesExhausted` exists to see.
+      Two other things set it apart. It is the **second collector to emit `volser` by
+      default**, after `cleaning_cartridges` and on the same justification applied to
+      a smaller population (five against seventy): bounded by service policy rather
+      than by library capacity. And it is the only cartridge collector carrying a
+      **full per-state stateset**, which the cardinality rule permits at five objects
+      and forbids at 9 749 — `data_cartridges` carries state as an `_info` label for
+      exactly that reason.
+      `usable` is deliberately narrower than the `normal` state count: a cartridge the
+      accessor cannot reach is one the library cannot select, and reading the state
+      count alone would report a healthy supply in the one situation where nothing can
+      be picked up.
 
 Deliberately excluded, with reasons, so a later session does not rediscover them as
 gaps: `ethernetPorts` carries IPv4/IPv6 addressing only and has no `state` field or
@@ -1290,8 +1308,25 @@ are stateset encoding; only the second is affordable at inventory scale.
   **Fleet impact: ~105 series across five libraries** — the smallest of the three
   `reports_*` collectors by an order of magnitude, and negligible against the
   totals below.
-- `diagnostic_cartridges`: labels `library`, `model`, `state`, `volser` (bounded, 5 in
-  the capture); 5 × (5 states + 1 `_info`); worst case ~30 series.
+- `diagnostic_cartridges`: labels `library`, `model`, `state`, `access`, `volser`,
+  `location`, `media_type`, `cartridge_type`, `worm` (bounded, 5 cartridges in the
+  capture); 5 × (5 states + 1 `_info`); worst case ~30 series; **observed 23**
+  (2026-08-03).
+  The plan's arithmetic assumed a per-CARTRIDGE stateset (5 × 5). What shipped
+  puts the stateset library-WIDE instead — `tapelibrary_diagnostic_cartridges{state}`
+  counts cartridges per state, 5 series total rather than 25 — because a per-cartridge
+  stateset answers a question the `_info` label already answers, at five times the
+  cost. The library-wide form additionally survives
+  `--collector.diagnostic_cartridges.per-volser=false`, which is what lets both alerts
+  keep working when a site turns the detail off.
+  The 23 break down as 5 state + 3 `access` + `usable` + `lifetime_unknown` (10
+  always-emitted, flag-independent), then 5 `_info` + 5 `last_usage` + 2
+  `lifetime_remaining_ratio` behind the flag, plus the freshness gauge. The
+  remaining-life series number 2 rather than 5 because three of the five cartridges
+  report no cartridge memory at all.
+  With `--collector.diagnostic_cartridges.per-volser=false` it drops to **11**, and
+  no alert loses its input.
+  **Fleet impact: ~115 series across five libraries.**
 
 **Fleet totals.** Defaults: ~2 425 series per library, **~12 150 across five
 libraries** — comfortable. With all three per-item flags enabled: ~142 800 per
@@ -2568,6 +2603,37 @@ library, so it exercises perhaps a third of the enumerated states.
     `reports_accessors` is the one collector whose defaults these numbers
     *confirm* — 2.5s against a 60s timeout, and 123 KB against the ~148 KB the
     build estimated.
+- 2026-08-03 `/add-collector diagnostic_cartridges` (background): **the nineteenth and
+  last planned collector; the `## Collectors` list is now fully ticked.** Fixture
+  derived from `samples/test_data/probe-2026-07-28/diagnosticCartridges.json`, kept
+  whole (5 entries, the entire population). **The only anonymisation was `sn`**,
+  rewritten from the capture's `SN000000{41,42}` to `SN0000000{1,2}`, matching
+  `testdata/drives.json`'s existing convention; volsers keep the capture's own
+  `TST###XX` spelling, as `testdata/cleaning_cartridges.json` and
+  `testdata/data_cartridges.json` already do, and every other field is a physical
+  location, an enum or a numeric reading. A `diff` of the two files shows those two
+  lines and nothing else. The original stays in `samples/`.
+  **A first draft of the fixture altered two state values for branch coverage and was
+  reverted**, which is worth recording as a rule rather than as an incident: the
+  repository's own precedent (`reports_drives`) keeps its fixture faithful to the
+  capture and covers edge cases with inline JSON literals in the test instead. A
+  fixture that has been edited for convenience stops being evidence of what the
+  hardware does. `atEndOfLife`, `accessible="no"` and an undocumented state are all
+  covered by inline literals here.
+  23 series observed against a planned ~30, reasoned about in `## Cardinality budget`.
+  `make check` green end to end; 66 alert rules parsed through
+  `prometheus/promql/parser`, 0 failures.
+  **Two decisions worth carrying.** (1) An empty array is a valid reading here and an
+  error everywhere else, for the reason the `## Collectors` entry gives. (2) `usable`
+  intersects state AND reachability rather than reading state alone, so a cartridge
+  stuck behind a blocking position is not counted as available; the test that pins
+  this constructs four cartridges of which three are `normal` and only one is usable.
+  **`orUnknown` was reused from `data_cartridges` rather than reimplemented**, and the
+  `valueCounts` emit-observed-anyway helper was written to match that collector's
+  existing shape (`delete` + `slices.Sorted(maps.Keys(...))`) after a first draft
+  introduced a `containsString` helper that collided with one already declared in
+  `docs_check_test.go` — invisible to `go build`, which excludes test files, and
+  caught only by `go test`.
 - **The concurrency ceiling decided in `## Architecture decisions` is not the
   shipped default** (found 2026-08-03). That section fixes it at 1, and
   `--exporter.max-requests-per-target` defaults to **0, meaning unlimited**. The

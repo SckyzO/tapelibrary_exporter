@@ -212,6 +212,7 @@ only need Docker or Podman, no host Go install required.
 - [`reports_library`](docs/metrics.md#reportslibrarycollector)
 - [`reports_drives`](docs/metrics.md#reportsdrivescollector)
 - [`reports_accessors`](docs/metrics.md#reportsaccessorscollector)
+- [`diagnostic_cartridges`](docs/metrics.md#diagnosticcartridgescollector)
 <!-- END GENERATED COLLECTORS -->
 
 Every metric this exporter can emit, grouped by collector, is documented in
