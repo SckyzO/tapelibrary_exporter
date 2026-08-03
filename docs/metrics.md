@@ -994,6 +994,215 @@ compression ratio, which is how the manual itself describes the pair.
 | `tapelibrary_library_report_window_duration_seconds` | Gauge | - | Number of seconds the reporting window covers, as the library reports it. 3600 on every window in the reference capture. Exposed so that a window covering less than a full hour is visible rather than assumed away: its activity figures would be proportionally low through no fault of the library. |
 | `tapelibrary_library_report_last_refresh_timestamp_seconds` | Gauge | - | Unix time of the last successful reports/library refresh. Alert if time() minus this exceeds 2x the collector's configured interval. Named for this collector's metric subsystem rather than its registered name, so a subsystem sweep finds the freshness of the data it is reading. Distinct from `tapelibrary_library_report_window_timestamp_seconds`, which ages even while this one stays current. |
 
+## ReportsDrivesCollector
+
+Defined in `internal/collector/reports_drives.go`, the background-refresh
+variant: a goroutine polls `GET /v1/reports/drives` on
+`--collector.reports_drives.interval` and every scrape serves the last cached
+result. It is `ReportsLibraryCollector`'s per-drive counterpart — the same
+hourly publication, resolved to the individual drive rather than aggregated
+over the library — and adds the error figures the library-wide report does not
+carry at all.
+
+**Its metrics are prefixed `..._drive_report_`, not `..._reports_drives_`.**
+The subsystem names the resource being reported on (the drive) with `report` as
+the qualifier, the shape `ReportsLibraryCollector` established, and it matches
+how every other per-drive family here is already spelled
+(`tapelibrary_drive_state`, `tapelibrary_drive_info`). The flag namespace still
+follows the endpoint: `--collector.reports_drives.*`.
+
+**`location` is the key, and the join to the rest of the exporter.** It carries
+the library's own native drive location (`drive_F1C4R1`) verbatim, so every
+series here lines up with `tapelibrary_drive_state`, `tapelibrary_drive_info`
+and `tapelibrary_fc_port_*`'s `drive_location`. The endpoint also returns each
+drive's serial as `sn`; it is deliberately **not** emitted, because
+`tapelibrary_drive_info` already carries it against the same key and an
+identity attribute belongs on exactly one `_info` series.
+
+**Every metric here is a Gauge, including the three error figures.** These are
+per-window quantities: `errorsCorrectedRead` counts the read errors this drive
+corrected during one specific hour, and the next window restarts from zero.
+`rate()` and `increase()` are meaningless on them and a `_total` suffix would
+be a lie. The library's genuinely monotonic error counters live on
+`/v1/dataCartridges/lifetimeMetrics`, per cartridge rather than per drive.
+
+**The errors are three metric names rather than one carrying a `direction`
+label,** which is where this collector deliberately parts company with
+`DataCartridgesLifetimeCollector`'s `{direction, correction}` pair. Prometheus's
+own [exporter-writing guidance](https://prometheus.io/docs/instrumenting/writing_exporters)
+names read/write as its canonical example of related-but-distinct concepts that
+are easier to use as separate metrics than as one metric with a label. That
+collector's cross product is complete — corrected and uncorrected, each read
+and write — which is what justifies the labelled histogram there. This endpoint
+reports `errorsUncorrected` with no direction breakdown at all, so a `direction`
+label here would need a synthetic value the library never sends, and summing
+across it would double-count.
+
+**The window selection is per drive, not library-wide.** All 40 drives share
+the newest window in the reference capture, but a drive that was removed, went
+offline, or was installed part-way through the week has its own last reported
+hour. Selection is by the entry's own `time` field rather than by its position
+in the array, for the reason `ReportsLibraryCollector` already documents. An
+entry missing a location or a parseable timestamp is skipped rather than
+failing the response — one unusable hour out of a week must not discard the
+other 167 for every drive — while a response with nothing selectable at all,
+or an empty array, is rejected and leaves the previous cache in place.
+
+**`tapelibrary_drive_report_window_timestamp_seconds` is per drive for exactly
+that reason.** The values are a snapshot of an already-closed window served at
+scrape time, with `honor_timestamps` deliberately not used (see
+`docs/exporter-journal.md`, "Open questions"), so a drive that stopped
+publishing would otherwise serve its last window forever with a *current*
+`..._last_refresh_timestamp_seconds` beside it — the refresh really is
+succeeding; it is the data behind it that has stopped moving. A library-wide
+timestamp would hide a single dropped-out drive behind its 39 healthy siblings.
+
+**This is the most expensive endpoint per byte in the exporter, and its
+defaults reflect that.** The default week is ~168 windows x 40 drives, roughly
+3.3 MB against `reports/library`'s ~67 KB for the same week, and the
+concurrency ceiling of 1 means that transfer blocks this library's other
+collectors while it runs. The interval is therefore **1h**, matching the
+endpoint's own publication cadence rather than quartering it as
+`reports_library` does at 15m, and the timeout is **60s**, in line with
+`data_cartridges` and `data_cartridges_lifetime`. The request carries no
+`after` parameter: bounding it would trade ~3.3 MB for a clock-skew failure
+mode in which a library running ahead of the exporter's host answers with an
+empty array, which presents as a collector that silently stops advancing.
+
+Temperature and humidity are six metrics rather than one carrying a
+`stat="average|min|max"` label, and the readings are taken at the drive, inside
+the library, so they read above the ambient figures R1.11.2's operating
+envelope is written against — both points are argued at length under
+`ReportsLibraryCollector` above and hold identically here. An absent reading
+emits no series at all rather than a `0`, per drive, so one sensorless drive
+never collapses the family for the others.
+
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `tapelibrary_drive_report_mounts` | Gauge | `location` | Number of cartridges mounted into this drive during the reporting window. A per-window figure, not a cumulative counter: the next window restarts from zero. |
+| `tapelibrary_drive_report_cleans` | Gauge | `location` | Number of times this drive was cleaned during the reporting window. A per-window figure, not a cumulative counter. Zero in every window of the reference capture: a drive requests cleaning rarely, so a window recording one is the event worth looking at. |
+| `tapelibrary_drive_report_read_by_hosts_bytes` | Gauge | `location` | Bytes read from cartridges by this drive during the reporting window. Converted from the API's megabytes, read decimally (1 MB = 1e6 bytes) to match how this exporter already converts the library report and the cartridge lifetime counters. |
+| `tapelibrary_drive_report_written_by_hosts_bytes` | Gauge | `location` | Bytes written to cartridges by this drive during the reporting window, measured before compression. Divide by `tapelibrary_drive_report_written_to_cartridges_bytes` for this drive's average compression ratio over the window. Converted from the API's decimal megabytes. |
+| `tapelibrary_drive_report_written_to_cartridges_bytes` | Gauge | `location` | Bytes this drive actually wrote onto the media during the reporting window, after compression. Converted from the API's decimal megabytes. |
+| `tapelibrary_drive_report_errors_corrected_read` | Gauge | `location` | Read errors this drive corrected during the reporting window. A corrected error cost throughput but lost no data; a drive whose corrected count runs far above its peers is the classic early signature of a failing head or a dirty tape path. Compare against `tapelibrary_drive_report_read_by_hosts_bytes` before reading a high count as a fault, since a busy drive corrects more. |
+| `tapelibrary_drive_report_errors_corrected_write` | Gauge | `location` | Write errors this drive corrected during the reporting window, typically by rewriting the affected block further along the tape. Compare against `tapelibrary_drive_report_written_by_hosts_bytes` before reading a high count as a fault. |
+| `tapelibrary_drive_report_errors_uncorrected` | Gauge | `location` | Errors this drive could not correct during the reporting window, read and write together: R1.11.2 reports no direction breakdown for these, unlike the corrected pair. Any non-zero value is data the drive failed to move, and is what `DriveReportUncorrectedErrors` reads. |
+| `tapelibrary_drive_report_temperature_average_celsius` | Gauge | `location` | Average temperature in Celsius this drive measured over the reporting window. Measured inside the library at the drive, so it reads above the ambient figure R1.11.2's operating envelope is written against. Absent, never zero, when the drive reported no reading. |
+| `tapelibrary_drive_report_temperature_min_celsius` | Gauge | `location` | Lowest temperature in Celsius this drive measured over the reporting window. Absent, never zero, when the drive reported no reading. |
+| `tapelibrary_drive_report_temperature_max_celsius` | Gauge | `location` | Highest temperature in Celsius this drive measured over the reporting window. Absent, never zero, when the drive reported no reading. |
+| `tapelibrary_drive_report_humidity_average_ratio` | Gauge | `location` | Average relative humidity this drive measured over the reporting window, as a ratio from 0 to 1 (the API reports a 0-100 percentage). Absent, never zero, when the drive reported no reading. |
+| `tapelibrary_drive_report_humidity_min_ratio` | Gauge | `location` | Lowest relative humidity this drive measured over the reporting window, as a ratio from 0 to 1. Absent, never zero, when the drive reported no reading. |
+| `tapelibrary_drive_report_humidity_max_ratio` | Gauge | `location` | Highest relative humidity this drive measured over the reporting window, as a ratio from 0 to 1. Absent, never zero, when the drive reported no reading. |
+| `tapelibrary_drive_report_window_timestamp_seconds` | Gauge | `location` | Unix time the library stamped on the reporting window these metrics describe, for this drive. Per drive rather than library-wide so that a single drive dropping out of the report is visible: the library publishes one window per completed hour, so alert if time() minus this exceeds a few hours. Every other metric in this family would otherwise keep serving a stale window's values indefinitely, looking healthy. |
+| `tapelibrary_drive_report_window_duration_seconds` | Gauge | `location` | Number of seconds this drive's reporting window covers, as the library reports it. 3600 on every window in the reference capture. Exposed so that a window covering less than a full hour is visible rather than assumed away: its activity figures would be proportionally low through no fault of the drive. |
+| `tapelibrary_drive_report_last_refresh_timestamp_seconds` | Gauge | - | Unix time of the last successful reports/drives refresh. Alert if time() minus this exceeds 2x the collector's configured interval. Named for this collector's metric subsystem rather than its registered name, so a subsystem sweep finds the freshness of the data it is reading. Distinct from `tapelibrary_drive_report_window_timestamp_seconds`, which ages even while this one stays current. |
+
+## ReportsAccessorsCollector
+
+Defined in `internal/collector/reports_accessors.go`, the background-refresh
+variant: a goroutine polls `GET /v1/reports/accessors` on
+`--collector.reports_accessors.interval` and every scrape serves the last
+cached result. It is the third and last of the `/v1/reports/*` family — the
+same hourly publication as `ReportsLibraryCollector` and
+`ReportsDrivesCollector`, resolved to the individual robotic accessor.
+
+**Its metrics are prefixed `..._accessor_report_`, not
+`..._reports_accessors_`.** The subsystem names the resource being reported on
+(the accessor) with `report` as the qualifier, the shape
+`ReportsLibraryCollector` established and `ReportsDrivesCollector` followed,
+and it matches how every other per-accessor family here is already spelled
+(`tapelibrary_accessor_state`, `tapelibrary_accessor_pivots_total`). The flag
+namespace still follows the endpoint: `--collector.reports_accessors.*`.
+
+**Every metric here is the per-window counterpart of a lifetime counter
+`AccessorsCollector` already emits, and that pairing is the whole point of
+this collector.** `/v1/accessors` reports `pivots`, `barCodeScans`, `travelX`,
+`travelY` and the four gripper counters as monotonic device totals that have
+accumulated into the millions over the machine's life; this endpoint reports
+the same five quantities for one completed hour. A lifetime counter moves
+imperceptibly when an accessor stops working — millions of gets, plus zero —
+while the hourly window it stops contributing to drops to zero immediately.
+Read the two together: `tapelibrary_accessor_gets_total` for wear,
+`tapelibrary_accessor_report_gets` for whether the robot is working right now.
+
+**Every metric here is therefore a Gauge, and none carries `_total`.** These
+are per-window quantities: the next window restarts from zero, so `rate()` and
+`increase()` are meaningless on them and a `_total` suffix would be a lie. The
+`_total`-suffixed counterparts on `AccessorsCollector` are the monotonic ones.
+
+**`gets` and `puts` are two metric names, while `gripper` and `axis` are
+labels,** which is not a contradiction — the two follow the same test applied
+to different fields. Prometheus's own
+[exporter-writing guidance](https://prometheus.io/docs/instrumenting/writing_exporters)
+names read/write and send/receive as its canonical example of
+related-but-distinct concepts easier to use as separate metrics than under one
+label; get/put is that shape. `gripper` passes the opposite test: R1.11.2
+reports the complete cross product (`getsGripper1`, `getsGripper2`,
+`putsGripper1`, `putsGripper2`), so summing across it is meaningful and no
+synthetic value has to be invented to square the table. `axis` is complete for
+the same reason (`travelX`, `travelY`). This mirrors how
+`AccessorsCollector` already spells its lifetime counterparts.
+
+**The window selection is per accessor, not library-wide.** Both accessors
+share the newest window in the reference capture, but one taken into service
+mode or removed part-way through the week has its own last reported hour. On a
+two-accessor library that matters more than it does on a forty-drive one: the
+sibling is not one of forty, it is the only other one. Selection is by the
+entry's own `time` field rather than by its position in the array, for the
+reason `ReportsLibraryCollector` already documents. An entry missing a location
+or a parseable timestamp is skipped rather than failing the response, while a
+response with nothing selectable at all, or an empty array, is rejected and
+leaves the previous cache in place.
+
+**`tapelibrary_accessor_report_window_timestamp_seconds` is per accessor for
+exactly that reason.** The values are a snapshot of an already-closed window
+served at scrape time, with `honor_timestamps` deliberately not used (see
+`docs/exporter-journal.md`, "Open questions"), so an accessor that stopped
+publishing would otherwise serve its last window forever with a *current*
+`..._last_refresh_timestamp_seconds` beside it — the refresh really is
+succeeding; it is the data behind it that has stopped moving.
+
+**The six environmental metrics emit nothing on the reference fleet, and that
+is the hardware rather than a defect.** These accessors carry no temperature or
+humidity sensor and report `null` in every window, exactly as
+`tapelibrary_accessor_temperature_celsius` and
+`tapelibrary_accessor_humidity_ratio` already do on `/v1/accessors`. They are
+shipped anyway, absent-never-zero, so a site whose accessors do carry sensors
+gets them without a code change: a `0` °C / `0`% RH standing in for "unknown"
+would sit outside R1.11.2's operating envelope in both directions. They are six
+metrics rather than one carrying a `stat="average|min|max"` label, argued at
+length under `ReportsLibraryCollector` above and holding identically here.
+
+**Its defaults sit between its two siblings'.** The interval is **15m**,
+matching `reports_library` rather than `reports_drives`' 1h: what pushed that
+collector to the endpoint's own cadence was ~3.3 MB against the concurrency
+ceiling of 1, and a library has two accessors, so the default week is ~168
+windows x 2, roughly 148 KB. Quartering the hourly cadence costs little and
+makes a freshly published window visible within 15 minutes rather than up to an
+hour, which matters on the one endpoint whose alert is about an accessor having
+stopped. The timeout is **60s** despite that small response, a deliberate
+departure from `reports_library`'s 5s: the RoE path can be slow in ways payload
+size does not predict, and a timeout that fires serves a permanently empty
+cache rather than late data. The request carries no `after` parameter, for the
+clock-skew reason its siblings document.
+
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `tapelibrary_accessor_report_pivots` | Gauge | `location` | Number of pivots this accessor performed during the reporting window. A per-window figure, not a cumulative counter: the next window restarts from zero. Its lifetime counterpart is `tapelibrary_accessor_pivots_total`. |
+| `tapelibrary_accessor_report_bar_code_scans` | Gauge | `location` | Number of bar code scans this accessor performed during the reporting window. A per-window figure, not a cumulative counter. Zero in every window of the reference capture: this fleet scans on inventory rather than on every move, so a window recording scans is an inventory pass. Its lifetime counterpart is `tapelibrary_accessor_bar_code_scans_total`. |
+| `tapelibrary_accessor_report_travel_meters` | Gauge | `location`, `axis` | Distance in meters this accessor travelled during the reporting window, per axis: x is horizontal, y is vertical. A per-window figure, not a cumulative counter. Its lifetime counterpart is `tapelibrary_accessor_travel_meters_total`. |
+| `tapelibrary_accessor_report_gets` | Gauge | `location`, `gripper` | Number of times this accessor's gripper engaged to retrieve a cartridge during the reporting window. A per-window figure, not a cumulative counter. Compare the two accessors' shares of the library total: a lifetime counter cannot show one of them stopping, which is what `AccessorReportShareCollapsed` reads. Its lifetime counterpart is `tapelibrary_accessor_gets_total`. |
+| `tapelibrary_accessor_report_puts` | Gauge | `location`, `gripper` | Number of times this accessor's gripper engaged to place a cartridge during the reporting window. A per-window figure, not a cumulative counter. Normally tracks gets closely, since a cartridge retrieved is a cartridge put somewhere. Its lifetime counterpart is `tapelibrary_accessor_puts_total`. |
+| `tapelibrary_accessor_report_temperature_average_celsius` | Gauge | `location` | Average temperature in Celsius this accessor measured over the reporting window. Absent, never zero, when the accessor reported no reading: the accessors on the reference fleet carry no such sensor and report null in every window, exactly as `tapelibrary_accessor_temperature_celsius` does. |
+| `tapelibrary_accessor_report_temperature_min_celsius` | Gauge | `location` | Lowest temperature in Celsius this accessor measured over the reporting window. Absent, never zero, when the accessor reported no reading. |
+| `tapelibrary_accessor_report_temperature_max_celsius` | Gauge | `location` | Highest temperature in Celsius this accessor measured over the reporting window. Absent, never zero, when the accessor reported no reading. |
+| `tapelibrary_accessor_report_humidity_average_ratio` | Gauge | `location` | Average relative humidity this accessor measured over the reporting window, as a ratio from 0 to 1 (the API reports a 0-100 percentage). Absent, never zero, when the accessor reported no reading. |
+| `tapelibrary_accessor_report_humidity_min_ratio` | Gauge | `location` | Lowest relative humidity this accessor measured over the reporting window, as a ratio from 0 to 1. Absent, never zero, when the accessor reported no reading. |
+| `tapelibrary_accessor_report_humidity_max_ratio` | Gauge | `location` | Highest relative humidity this accessor measured over the reporting window, as a ratio from 0 to 1. Absent, never zero, when the accessor reported no reading. |
+| `tapelibrary_accessor_report_window_timestamp_seconds` | Gauge | `location` | Unix time the library stamped on the reporting window these metrics describe, for this accessor. Per accessor rather than library-wide so that one of the two dropping out of the report is visible: the library publishes one window per completed hour, so alert if time() minus this exceeds a few hours. Every other metric in this family would otherwise keep serving a stale window's values indefinitely, looking healthy. |
+| `tapelibrary_accessor_report_window_duration_seconds` | Gauge | `location` | Number of seconds this accessor's reporting window covers, as the library reports it. 3600 on every window in the reference capture. Exposed so that a window covering less than a full hour is visible rather than assumed away: its activity figures would be proportionally low through no fault of the accessor. |
+| `tapelibrary_accessor_report_last_refresh_timestamp_seconds` | Gauge | - | Unix time of the last successful reports/accessors refresh. Alert if time() minus this exceeds 2x the collector's configured interval. Named for this collector's metric subsystem rather than its registered name, so a subsystem sweep finds the freshness of the data it is reading. Distinct from `tapelibrary_accessor_report_window_timestamp_seconds`, which ages even while this one stays current. |
+
 ## Self-instrumentation
 
 Always registered on this target model, with no `--collector.*` flag gating

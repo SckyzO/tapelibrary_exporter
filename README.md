@@ -210,6 +210,8 @@ only need Docker or Podman, no host Go install required.
 - [`events`](docs/metrics.md#eventscollector)
 - [`data_cartridges_lifetime`](docs/metrics.md#datacartridgeslifetimecollector)
 - [`reports_library`](docs/metrics.md#reportslibrarycollector)
+- [`reports_drives`](docs/metrics.md#reportsdrivescollector)
+- [`reports_accessors`](docs/metrics.md#reportsaccessorscollector)
 <!-- END GENERATED COLLECTORS -->
 
 Every metric this exporter can emit, grouped by collector, is documented in

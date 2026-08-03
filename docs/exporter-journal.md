@@ -143,6 +143,28 @@
     metric rather than in a matcher. **No `stat` key is therefore added to the
     shared label vocabulary above**, and the same reasoning binds
     `reports_drives` and `reports_accessors`, which carry the same triplets.
+  - **read/write is a metric-name distinction, not a label** (decided 2026-08-03
+    on `reports_drives`, against the maintainer's instruction to follow
+    Prometheus's own guidance rather than this repository's habit). Prometheus's
+    *Writing Exporters* page — the same document the `stat` rule above is checked
+    against — names **read/write and send/receive** as its canonical example of
+    "related but distinct concepts" that are easier to use as separate metrics
+    than combined under one label. `reports_drives` therefore ships
+    `..._errors_corrected_read` and `..._errors_corrected_write` as two names,
+    not `..._errors_corrected{direction=…}`.
+    **This does not retract `data_cartridges_lifetime`'s `{direction, correction}`
+    pair, and the difference between the two cases is the rule worth carrying
+    forward.** There, R1.11.2 reports a *complete* cross product — corrected and
+    uncorrected, each split read and write — so the labels describe a real
+    two-dimensional table and a histogram over it is the shape of the data.
+    `/v1/reports/drives` reports `errorsUncorrected` with **no direction
+    breakdown at all**, so the same pair of labels would have needed a synthetic
+    `direction="all"` the library never sends, and summing across `direction`
+    would then double-count. **The test is whether the source splits the
+    dimension completely: it does → labels are available; it does not → separate
+    names, and never a placeholder value invented to square the table.**
+    Binding on `reports_accessors`, whose gets/puts pair is the same shape and
+    should ship as two names rather than an `operation` label.
 - **Shared label vocabulary:** `library`, `model`, `location`, `state`, `operation`,
   `access`, `logical_library`, `media_type`, `cartridge_type`, `frame_type`,
   `card_type`, `severity`, `gripper`, `axis`, `door`, `direction`, `correction`,
@@ -797,8 +819,40 @@ variant** — `multi-instance` admits no other.
       interval chosen against the data's cadence rather than the endpoint's cost
       (`15m` against an hourly publication), and the only collector whose values
       describe a window that closed before the scrape.
-- [ ] `reports_drives`  background  `GET /v1/reports/drives`
-- [ ] `reports_accessors`  background  `GET /v1/reports/accessors`
+- [x] `reports_drives`  background  built 2026-08-03 — `GET /v1/reports/drives`.
+      **The third collector whose metric subsystem is not its registered name**, and
+      the first to follow `reports_library`'s rule rather than establish an exception
+      to it: `tapelibrary_drive_report_*`, exactly as that entry predicted. Two
+      things set it apart from its sibling. It is the **most expensive endpoint per
+      byte in the exporter** — one entry per drive per hour, so the same default week
+      that costs `reports/library` ~67 KB costs this ~3.3 MB — which is why it is the
+      only collector whose interval (`1h`) matches its endpoint's publication cadence
+      instead of subdividing it, and why its timeout is `60s`. And it is the first
+      `reports_*` collector to carry a label at all: `location`, which joins to
+      `drives` and `fc_ports`. Its window timestamp is per drive rather than
+      library-wide, because a single drive dropping out of the report is precisely
+      what a library-wide one would hide.
+- [x] `reports_accessors`  background  built 2026-08-03 — `GET /v1/reports/accessors`.
+      **The fourth collector whose metric subsystem is not its registered name**
+      (`tapelibrary_accessor_report_*`), following `reports_library`'s rule exactly as
+      that entry predicted for both siblings. Three things distinguish it. It is the
+      only collector in the exporter whose **every** metric is the per-window
+      counterpart of a lifetime counter another collector already emits: `accessors`
+      ships `pivots`, `bar_code_scans`, `travel_meters`, `gets` and `puts` as
+      `_total`-suffixed monotonic device counters, and this ships the same five
+      quantities for one closed hour, as Gauges. That pairing is the collector's whole
+      justification — a lifetime counter at 2.7 million gets moves imperceptibly when
+      an accessor stops, while its hourly window drops to zero at once. It is the
+      first collector whose defaults are **split between its two siblings**: 15m from
+      `reports_library` (the response is ~148 KB, so `reports_drives`' size argument
+      for an hourly cadence does not reach), 60s from `reports_drives` but for a
+      different reason — taken with the maintainer, because the RoE path is slow in
+      ways payload size does not predict. And it is the first collector whose
+      environmental metrics **emit nothing on the entire fleet**: these accessors carry
+      no temperature or humidity sensor and report null in every window, exactly as
+      `/v1/accessors` does. All six ship anyway, absent-never-zero, so hardware that
+      does report them needs no code change; the test triad pins both halves rather
+      than leaving the dead branch untested.
 - [ ] `diagnostic_cartridges`  background  `GET /v1/diagnosticCartridges`
 
 Deliberately excluded, with reasons, so a later session does not rediscover them as
@@ -1190,9 +1244,52 @@ are stateset encoding; only the second is affordable at inventory scale.
   operating envelope in both directions and page. The nine always-emitted series
   are what keep `StatusTracker` truthful on a sensorless library.
 - `reports_drives`: labels `library`, `model`, `location`; 40 drives × ~13;
-  worst case ~520 series.
-- `reports_accessors`: labels `library`, `model`, `location`; 2 × ~13;
-  worst case ~26 series.
+  worst case ~520 series; **observed 641** (2026-08-03), i.e. 40 × 16 + 1.
+  The gap is 3 series per drive, and every one of them was a decision taken with
+  the maintainer during the build rather than a metric that crept in.
+  **Two are the window's own identity** (`..._window_timestamp_seconds` and
+  `..._window_duration_seconds`), carried at per-drive granularity rather than
+  once for the collector. `reports_library` pays 2 series for the same pair and
+  the plan simply did not restate the cost when the same shape was applied to 40
+  objects. Per drive was chosen anyway, against a cheaper single global pair,
+  because the timestamp is the only thing that shows a *single* drive falling out
+  of the report — a library-wide one reads as healthy while 1 of 40 drives has
+  gone silent, which is the exact failure the gauge exists for. The duration
+  follows it rather than being split off, to avoid an exporter-invented aggregate
+  ("the oldest window across drives") standing where the library's own number
+  should be.
+  **The third is the error split**: `errors_corrected_read`,
+  `errors_corrected_write` and `errors_uncorrected` are three series where the
+  ~13 estimate assumed two. See `## Architecture decisions`.
+  The always-emitted floor is 10 series per drive; the 6 environmental readings
+  are absent rather than zeroed per drive, so a library whose drives report no
+  sensors emits 401 rather than 641, and one sensorless drive among 39 healthy
+  ones costs only its own 6.
+  **Fleet impact: ~3 205 series across five libraries against the ~2 600 planned**,
+  which the totals below absorb without changing any conclusion they draw.
+- `reports_accessors`: labels `library`, `model`, `location`, plus `gripper` and
+  `axis`; 2 × ~13; worst case ~26 series; **observed 21** (2026-08-03), against a
+  worst case that is actually **33** (2 × 16 + 1). Both figures differ from the plan
+  and in opposite directions, which is the interesting part.
+  **The worst case is higher than planned because the plan counted 13 metric NAMES
+  and the collector emits 16 SERIES per accessor.** Three of the five activity
+  families carry a second label the plan did not price: `travel_meters` splits on
+  `axis` (2 series), `gets` and `puts` each split on `gripper` (2 each). Those
+  labels are not an addition — `accessors` already spells its lifetime counterparts
+  the same way, and R1.11.2 reports both cross products completely, which is the
+  test `## Architecture decisions` sets for a label being available at all. The
+  per-accessor window timestamp and duration are the same 2 series `reports_drives`
+  already paid for and the plan again did not restate.
+  **The observed figure is lower than planned because all six environmental
+  readings are absent on this hardware.** The always-emitted floor is 10 series per
+  accessor, and every entry of the 2026-07-28 capture reports null for
+  temperature and humidity alike, so this fleet emits 2 × 10 + 1 = 21. A library
+  whose accessors carried sensors would reach 33. That gap is the collector's
+  documented shape rather than a discrepancy: the six descriptors ship so hardware
+  that reports them needs no code change.
+  **Fleet impact: ~105 series across five libraries** — the smallest of the three
+  `reports_*` collectors by an order of magnitude, and negligible against the
+  totals below.
 - `diagnostic_cartridges`: labels `library`, `model`, `state`, `volser` (bounded, 5 in
   the capture); 5 × (5 states + 1 `_info`); worst case ~30 series.
 
@@ -1862,6 +1959,108 @@ library, so it exercises perhaps a third of the enumerated states.
   is a rule Prometheus will refuse to load, so `fc_ports` currently has one alert fewer
   than its documentation claims. It should be the next commit, before
   `reports_drives`.
+  - **Reconciled 2026-08-03: this no longer reproduces, and it is the claim above
+    that was wrong rather than the rule.** Re-run against the same
+    `prometheus/prometheus v0.313.2` this entry names, with the same
+    `NewParser(Options{}).ParseExpr` call, `FCPortSpeedBelowPeers` parses cleanly:
+    **60 rules, 0 failures**, the rule itself untouched on disk since. A comparison
+    operator does accept `on (…) group_left ()`, so the expression was always valid
+    and the six sessions of deferral were spent on a harness artifact, not on a
+    shipped defect. **`fc_ports` has the alert count its documentation claims, and
+    no `fix(alerts):` commit is owed.** Recorded rather than deleted because the
+    lesson is the durable part: five sessions in a row inherited a failure from the
+    session before without re-deriving it, and the standing instruction that
+    follows is that a blocker carried across a `/clear` is re-verified before it is
+    allowed to reorder any work.
+
+- 2026-08-03 `/add-collector reports_drives`: the seventeenth collector, and the
+  second of the three `reports_*` windows. `GET /v1/reports/drives`, background,
+  `60s`/`1h`. Fixture derived from
+  `samples/test_data/probe-2026-07-28/reportsDrives.json`, trimmed from 160 entries
+  (40 drives × 4 windows) to 9 (3 drives × 3 windows) — enough that "newest window,
+  **per drive**" is a testable claim rather than an accident of ordering. **The only
+  anonymisation was the `sn` field**, rewritten from the capture's real
+  `SN000000{63,85,94}` to `SN0000000{1,2,3}`, matching `testdata/drives.json`'s
+  existing convention; locations are physical positions and carry nothing
+  identifying, and every other field is a timestamp or a numeric reading. The
+  original stays in `samples/`. The three drives were chosen for coverage rather
+  than at random: one idle, one busy, and one reporting an uncorrected error in its
+  newest window.
+  641 series observed against a planned ~520, reasoned about in
+  `## Cardinality budget`. `make check` green end to end.
+  **Three decisions were settled with the maintainer here.** (1) The request stays
+  unbounded — no `after` parameter — and the ~3.3 MB weekly response is paid for by
+  polling **hourly instead of quarter-hourly**, matching the endpoint's own
+  publication cadence; the alternative, an `events`-style lookback, was rejected
+  because a clock-skewed `after` presents as a collector that silently stops
+  advancing. Timeout `60s`, in line with `data_cartridges`. (2) The window timestamp
+  and duration are **per drive**. (3) The error figures are **three metric names,
+  not a `direction` label**, decided explicitly on Prometheus's own guidance rather
+  than on this repository's precedent — recorded under `## Architecture decisions`
+  and binding on `reports_accessors`.
+  **Two observations from the capture that are not decisions but should not be
+  lost.** Uncorrected errors are **not rare on healthy hardware**: 7 of 40 drives
+  reported between 1 and 3, across 10 of the 160 drive-windows captured, on a
+  library nobody considered faulty. That is why `DriveReportUncorrectedErrors` is a
+  *share* rule (one drive holding >25% of its library's total) with a volume floor,
+  rather than the `> 0` an absolute reading would have suggested — the capture's
+  worst drive already held 43% over 4 hours. And **three entries report exactly
+  65535**, which is a saturated 16-bit counter rather than a reading; the collector
+  does not detect saturation and deliberately does not pretend to, so a window
+  reporting it is served as-is. See `## Open questions`.
+  Four rules ship: `DriveReportWindowStale` (4h, not the library rule's 3h, because
+  this collector's own 1h poll interval sits inside the measurement),
+  `DriveReportUncorrectedErrors` at two tiers, and `DriveReportTemperatureHigh`. No
+  per-drive humidity rule ships, and the reason is in the file.
+  **`promtool` is still absent**; rules were validated as in previous sessions by
+  parsing every expression through `prometheus/promql/parser` v0.313.2 — **60 rules,
+  0 failures**, which is also what reconciled the `FCPortSpeedBelowPeers` claim
+  above.
+- 2026-08-03 `/add-collector reports_accessors` (background): the seventeenth real
+  collector and the last of the `reports_*` family, leaving only
+  `diagnostic_cartridges` unbuilt. Fixture derived from
+  `samples/test_data/probe-2026-07-28/reportsAccessors.json`, kept **whole** rather
+  than trimmed — 8 entries, 2 accessors × 4 hourly windows, ~3.5 KB — because a
+  library has only two accessors and four windows of depth is what makes the
+  per-accessor newest-window selection testable. **Nothing was anonymised, and
+  nothing needed to be**: unlike `reports_drives`, this endpoint carries no `sn`
+  and no other identity string at all. Every field is a location (a physical
+  position), a timestamp, or a numeric reading. The original stays in `samples/`.
+  21 series observed against a planned ~26 and a real worst case of 33, reasoned
+  about in `## Cardinality budget`. `make check` green end to end: vet, lint (0
+  issues), tests, govulncheck, actionlint, zizmor, deadcode and docs-check, the
+  last with no WARNING.
+  **Three decisions were settled with the maintainer here.** (1) The six
+  environmental metrics **ship despite emitting nothing on this entire fleet** —
+  these accessors carry no sensor and report null in every window, exactly as
+  `/v1/accessors` does. Shipping them follows `AccessorsCollector`'s own precedent,
+  costs 0 series here, and means hardware that does report them needs no code
+  change; the alternative, omitting them, would have made the two accessor families
+  inconsistent. The test triad pins both halves, so the branch is not dead code.
+  (2) The timeout is **60s, not the 5s the ~148 KB response would justify**, at the
+  maintainer's instruction: the RoE path is slow in ways payload size does not
+  predict, and a timeout that fires serves a permanently empty cache rather than
+  late data. The interval stays at `reports_library`'s 15m, since
+  `reports_drives`' size argument for an hourly cadence does not reach a
+  two-accessor endpoint. (3) `AccessorReportShareCollapsed` fires below a **10%**
+  share with a **20 gets/window** floor.
+  **Two observations from the capture that are not decisions but should not be
+  lost.** The two accessors do **not** split the work evenly: across the four
+  captured windows the split runs 0.62/0.38, 0.52/0.48, 0.40/0.60 and 0.54/0.46, so
+  40% is an ordinary low and any imbalance rule tighter than ~0.3 would page on a
+  healthy library. That is why the shipped rule is a *collapse* rule at 0.10 rather
+  than the imbalance rule the candidate line implied. And `barCodeScans` is **0 in
+  every window** while the lifetime counter stands at 258 892: this fleet scans on
+  inventory passes rather than on every move, so a window recording scans is an
+  inventory, not routine traffic — which is why no rule reads it.
+  Two rules ship: `AccessorReportWindowStale` at **3h15m**, applying the arithmetic
+  `## Open questions` set for this collector (three missed publications *plus* the
+  collector's own 15m interval) rather than copying its siblings' 3h or 4h, and
+  `AccessorReportShareCollapsed`. No environmental rule ships, and the reason is in
+  the file.
+  **`promtool` is still absent**; rules were validated as in previous sessions by
+  parsing every expression through `prometheus/promql/parser` v0.313.2 — **62 rules,
+  0 failures**, the 60 recorded above plus these two.
 
 ## Open questions / assumptions
 
@@ -2217,6 +2416,47 @@ library, so it exercises perhaps a third of the enumerated states.
     data advancing are different claims, and only the second one matters here.**
     Binding on `reports_drives` and `reports_accessors`, which have the same
     split and need the same pair of gauges.
+  - **Extended 2026-08-03 by `reports_drives`, which needed the pair per DRIVE.**
+    The note above was written for a collector exposing one window, and the
+    per-drive endpoint makes a second failure visible that a library-wide
+    timestamp cannot: one drive of forty falling out of the report while the
+    library keeps publishing normally. `..._drive_report_window_timestamp_seconds`
+    therefore carries `location`, and `DriveReportWindowStale` reads it at **4h**
+    rather than the library rule's 3h — both mean "three missed hourly
+    publications", but this collector polls hourly against `reports_library`'s 15m,
+    so the exporter's own interval eats an hour of the margin before the data is
+    even stale. **The rule for `reports_accessors`: the staleness threshold is
+    three missed publications PLUS the collector's own interval, not a constant
+    copied between collectors.**
+  - **Applied and closed 2026-08-03 by `reports_accessors`, the last collector
+    this note was binding on.** `tapelibrary_accessor_report_window_timestamp_seconds`
+    ships per accessor, and `AccessorReportWindowStale` reads it at **3h15m** —
+    3h of missed publications plus that collector's own 15m interval, computed
+    rather than copied. The three thresholds now read 3h / 4h / 3h15m across
+    `reports_library` / `reports_drives` / `reports_accessors`, which looks
+    arbitrary until the intervals beside them (15m / 1h / 15m) are read too: all
+    three mean the same three missed hourly publications. `reports_library`'s 3h
+    is the one that predates the rule and is ~15m tighter than the arithmetic
+    would now give; it is left alone rather than corrected, since a rule an
+    operator may have wired up should not shift for consistency's sake.
+    **The split this note describes is now covered on every `reports_*`
+    collector**, and the rule to carry into any future one that exposes a
+    published window: two gauges, never one, because a refresh succeeding and
+    the data advancing are different claims.
+  - **The error counters appear to be 16-bit, and saturate** (observed 2026-08-03
+    on `reports_drives`, not documented by R1.11.2 either way). Three entries in
+    the 2026-07-28 capture report exactly **65535** — two on `errorsCorrectedWrite`,
+    one on `errorsCorrectedRead` — against neighbouring windows in the tens to low
+    thousands. 2¹⁶−1 arriving three times is a ceiling, not a coincidence, so the
+    true count for those windows is "65535 or more" and is unknowable from the
+    wire. **The collector emits the value as reported and detects nothing**, which
+    is the right default: inventing a sentinel or dropping the sample would both
+    assert something the manual does not say. It matters for alerting rather than
+    for the metric — a rule averaging over a window containing a saturated sample
+    is reading a floor, not a mean — and `DriveReportUncorrectedErrors` is
+    insulated by luck rather than by design, since `errorsUncorrected` has not been
+    observed saturating. Verify against a drive whose error count is known from the
+    host side, and revisit if a saturated `errorsUncorrected` is ever seen.
   - **What "complete" means was never defined, and still is not.** The design
     said "newest complete window" without stating how a partial one would be
     recognised. The collector selects the newest by `time` and does not filter

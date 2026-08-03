@@ -504,6 +504,75 @@ func main() {
 		},
 	})
 
+	// reports_drives reads the same hourly publication as reports_library, but
+	// one entry per drive rather than one per library, and that changes both
+	// defaults away from its sibling's.
+	//
+	// The interval is 1h, not 15m: the endpoint publishes one window per
+	// completed hour, so a quarter-hourly poll returns the same 40 rows four
+	// times over. What makes that repetition expensive here rather than merely
+	// wasteful is the response size — the default week is ~168 windows x 40
+	// drives, roughly 3.3 MB against reports/library's ~67 KB for the same
+	// week — combined with the concurrency ceiling of 1, which means every
+	// byte of it blocks this library's other collectors. Matching the
+	// publication cadence instead of quartering it cuts the transfer fourfold
+	// for data that cannot change in between. The cost is stated rather than
+	// hidden: a freshly published window can sit up to an hour unseen, which
+	// tapelibrary_drive_report_window_timestamp_seconds makes visible.
+	//
+	// The timeout is 60s for the same reason it is on data_cartridges and
+	// data_cartridges_lifetime: 3.3 MB over the LCC-backed path is not a 5s
+	// request.
+	reportsDrivesTimeout := kingpin.Flag("collector.reports_drives.timeout", "Per-request timeout for the reports_drives collector. Higher than most collectors: the endpoint returns a week of hourly windows for every drive, ~3.3 MB on a 40-drive library.").Default("60s").Duration()
+	reportsDrivesInterval := kingpin.Flag("collector.reports_drives.interval", "Background refresh interval for the reports_drives collector. Defaults to the endpoint's own hourly cadence: R1.11.2 publishes one report per drive per completed hour, so polling faster re-transfers the same windows.").Default("1h").Duration()
+	reportsDrivesEnabled := kingpin.Flag("collector.reports_drives", "Enable the reports_drives collector.").Default("true").Bool()
+	factories = append(factories, instance.Factory{
+		Name:    "reports_drives",
+		Enabled: reportsDrivesEnabled,
+		New: func(h *instance.Handle) (instance.BackgroundCollector, error) {
+			c, err := h.ClientFor(*reportsDrivesTimeout)
+			if err != nil {
+				return nil, err
+			}
+			return collector.NewReportsDrivesCollector(log, c, *reportsDrivesInterval), nil
+		},
+	})
+
+	// reports_accessors reads the same hourly publication as its two
+	// siblings, one entry per accessor, and its defaults land between theirs
+	// rather than copying either wholesale.
+	//
+	// The interval is 15m, matching reports_library rather than
+	// reports_drives' 1h. What pushed reports_drives to the endpoint's own
+	// cadence was size against the concurrency ceiling of 1 — a ~3.3 MB
+	// transfer blocking every sibling on the library, four times an hour.
+	// That argument does not reach here: a library has two accessors, so the
+	// default week is ~168 windows x 2, roughly 148 KB at the capture's ~440
+	// bytes per entry. Quartering the hourly cadence costs little and means a
+	// freshly published window is visible within 15 minutes rather than up to
+	// an hour, which matters on the one endpoint whose alert
+	// (AccessorReportShareCollapsed) is about an accessor having stopped.
+	//
+	// The timeout is 60s despite that small response, and it is a deliberate
+	// departure from reports_library's 5s: the RoE path is slow in ways the
+	// response size does not predict, and a timeout that fires serves a
+	// permanently empty cache rather than late data. The cost of the higher
+	// value is bounded by the concurrency ceiling being per instance.
+	reportsAccessorsTimeout := kingpin.Flag("collector.reports_accessors.timeout", "Per-request timeout for the reports_accessors collector. Generous relative to the ~148 KB response: the RoE path can be slow regardless of payload size, and a timeout that fires leaves the cache empty.").Default("60s").Duration()
+	reportsAccessorsInterval := kingpin.Flag("collector.reports_accessors.interval", "Background refresh interval for the reports_accessors collector. Defaults to a quarter of the endpoint's own hourly cadence, as reports_library does: R1.11.2 publishes one report per accessor per completed hour, and the response is small enough that re-reading it costs little.").Default("15m").Duration()
+	reportsAccessorsEnabled := kingpin.Flag("collector.reports_accessors", "Enable the reports_accessors collector.").Default("true").Bool()
+	factories = append(factories, instance.Factory{
+		Name:    "reports_accessors",
+		Enabled: reportsAccessorsEnabled,
+		New: func(h *instance.Handle) (instance.BackgroundCollector, error) {
+			c, err := h.ClientFor(*reportsAccessorsTimeout)
+			if err != nil {
+				return nil, err
+			}
+			return collector.NewReportsAccessorsCollector(log, c, *reportsAccessorsInterval), nil
+		},
+	})
+
 	kingpin.Version(version.Print("tapelibrary_exporter"))
 	kingpin.HelpFlag.Short('h')
 

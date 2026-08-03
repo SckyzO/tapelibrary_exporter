@@ -1379,6 +1379,253 @@ groups:
       # rather than an operational event in itself.
 
       # ──────────────────────────────────────────────────────────────────
+      # Business: ReportsDrivesCollector (added via /add-collector)
+      # ──────────────────────────────────────────────────────────────────
+      # Same hourly publication as the library report above, resolved to the
+      # individual drive. Read DriveReportWindowStale first for the same
+      # reason LibraryReportWindowStale is listed first: if a drive's windows
+      # have stopped advancing, every other tapelibrary_drive_report_* series
+      # for that drive is still being served at face value.
+      #
+      # Its threshold is 4h, not the library rule's 3h, and the difference is
+      # deliberate. Both mean "three missed hourly publications", but the
+      # exporter's own poll interval sits inside the measurement: this
+      # collector refreshes hourly (--collector.reports_drives.interval, 1h,
+      # against reports_library's 15m), so a perfectly healthy window can
+      # already be up to an hour old before the exporter has fetched it. 4h
+      # restores the same real margin the library rule has at 3h.
+      - alert: DriveReportWindowStale
+        expr: time() - tapelibrary_drive_report_window_timestamp_seconds > 14400
+        for: 0m
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter drive {{ $labels.location }} on library {{ $labels.library }} has published no report for 4 hours'
+          description: 'Drive {{ $labels.location }} on library {{ $labels.library }} last stamped an hourly report {{ $value | humanizeDuration }} ago, while its siblings kept reporting. R1.11.2 publishes one window per drive per completed hour, so this is that drive dropping out of the reporting path, not the library going quiet — LibraryReportWindowStale would be firing too if it were. Check tapelibrary_drive_state and tapelibrary_drive_access for the same location. Every other tapelibrary_drive_report_* series for this drive is still serving its stale window at face value: do not read them as current until this clears.'
+
+      # The classic bad-drive signature: one drive accumulating a
+      # disproportionate share of the library's uncorrected errors. A share
+      # rule rather than an absolute one, because uncorrected errors are NOT
+      # rare on healthy hardware and an absolute threshold would either page
+      # constantly or never — in the reference capture 7 of 40 drives
+      # reported between 1 and 3 uncorrected errors, in 10 of the 160
+      # drive-windows captured. A single drive holding most of the library's
+      # total while 39 others share the rest is the shape that distinguishes
+      # a failing head from ordinary media wear.
+      #
+      # avg_over_time, not sum_over_time, and that is load-bearing rather
+      # than stylistic. These gauges are per-window values re-served on every
+      # scrape until the next refresh, so sum_over_time would count each
+      # hourly window once per scrape and make every figure below depend on
+      # scrape_interval. avg_over_time[24h] reads as "mean uncorrected errors
+      # per hourly window over the last day" at any scrape interval, and
+      # multiplying by 24 estimates the day's total.
+      #
+      # **The 25% share and the volume floor have no grounding in R1.11.2**,
+      # which enumerates no expected error rate at all, and they are flagged
+      # as such the same way LibraryReportNoMounts is. What IS grounded is
+      # the floor's position relative to the reference capture: its worst
+      # drive averaged 1.5 uncorrected errors per window over the 4 hours
+      # captured, on a library nobody considered faulty, so the warning tier
+      # sits above that at 2 per window sustained across a full day. A fair
+      # share on a 40-drive library is 2.5%, so 25% is ten times a drive's
+      # own weight. Measure a few weeks of your own fleet before wiring this
+      # to a notification.
+      - alert: DriveReportUncorrectedErrors
+        expr: |
+          (
+            avg_over_time(tapelibrary_drive_report_errors_uncorrected[24h])
+              / on(job, instance, library) group_left()
+            sum by(job, instance, library) (avg_over_time(tapelibrary_drive_report_errors_uncorrected[24h]))
+          ) > 0.25
+          and
+          avg_over_time(tapelibrary_drive_report_errors_uncorrected[24h]) > 2
+        for: 1h
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter drive {{ $labels.location }} on library {{ $labels.library }} holds most of the library uncorrected errors'
+          description: 'Drive {{ $labels.location }} on library {{ $labels.library }} accounts for {{ $value | humanizePercentage }} of every uncorrected error its library reported over 24 hours, averaging more than 2 per hourly window. On a 40-drive library a fair share is 2.5%. This is the classic failing-head or dirty-tape-path signature: compare tapelibrary_drive_report_errors_corrected_read for the same location, which usually climbs first, and check tapelibrary_drive_report_cleans to see whether the library has already been trying to clean its way out of it.'
+
+      - alert: DriveReportUncorrectedErrors
+        expr: |
+          (
+            avg_over_time(tapelibrary_drive_report_errors_uncorrected[24h])
+              / on(job, instance, library) group_left()
+            sum by(job, instance, library) (avg_over_time(tapelibrary_drive_report_errors_uncorrected[24h]))
+          ) > 0.25
+          and
+          avg_over_time(tapelibrary_drive_report_errors_uncorrected[24h]) > 5
+        for: 1h
+        labels:
+          severity: critical
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter drive {{ $labels.location }} on library {{ $labels.library }} is failing to move data'
+          description: 'Drive {{ $labels.location }} on library {{ $labels.library }} averaged more than 5 uncorrected errors per hourly window over 24 hours while holding {{ $value | humanizePercentage }} of its library total. An uncorrected error is data the drive did not move. Take the drive out of service before it writes anything else: a failing head damages the media it touches, so every cartridge mounted here since the count started rising is a candidate for verification.'
+
+      # The per-drive counterpart to LibraryReportTemperatureHigh, reading the
+      # same allowable 32 °C ceiling from R1.11.2 and differing only in that
+      # it can name the drive. Its warning tier and this rule therefore fire
+      # on the same physical condition — that one is written against
+      # tapelibrary_library_report_temperature_max_celsius, which IS the
+      # hottest drive, it simply cannot say which. That overlap is stated
+      # rather than resolved here: LibraryReportTemperatureHigh ships already
+      # and removing a rule an operator may have wired up is not this
+      # collector's call to make. A site running both should silence the
+      # library rule's WARNING tier and keep its critical one, which reads
+      # the population average and is a genuinely different signal.
+      - alert: DriveReportTemperatureHigh
+        expr: tapelibrary_drive_report_temperature_max_celsius > 32
+        for: 2h
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter drive {{ $labels.location }} on library {{ $labels.library }} is above its allowable temperature'
+          description: 'Drive {{ $labels.location }} on library {{ $labels.library }} reported {{ $value }} °C, above R1.11.2''s allowable ceiling of 32 °C, for 2 hourly windows. This reading is taken at the drive, inside the enclosure, so it runs above the ambient figure that envelope is written for. If tapelibrary_library_report_temperature_average_celsius is normal, the cause is this slot rather than the room: check the frame airflow and the drive fan before the media.'
+
+      # No per-drive humidity rule ships, and the omission is deliberate.
+      # Humidity spanned 25-41% across the drives of the reference capture's
+      # healthy library, and it is a property of the air the whole frame
+      # breathes rather than of any one drive: a rule naming a location would
+      # page about the room while pointing at hardware nobody should touch.
+      # LibraryReportHumidityHigh already reads the population average, which
+      # is the right granularity for it.
+      #
+      # Nothing ships on mounts, cleans or the three data-volume gauges
+      # either, for the reason their library-wide counterparts carry no rule:
+      # they measure how much work the hosts asked for. A per-drive figure
+      # does add one question the library-wide one cannot answer — whether
+      # the load is spread evenly across the drives — but that is a
+      # dashboard, not a page, and nobody has measured what an even spread
+      # looks like on this fleet. tapelibrary_drive_report_cleans is worth
+      # watching for the same reason and on the same terms: a drive
+      # requesting cleaning repeatedly is a real signal, and no grounded
+      # threshold for "repeatedly" exists yet.
+      #
+      # tapelibrary_drive_report_window_duration_seconds carries no rule, for
+      # the reason its library-wide counterpart does not.
+
+      # ──────────────────────────────────────────────────────────────────
+      # Business: ReportsAccessorsCollector (added via /add-collector)
+      # ──────────────────────────────────────────────────────────────────
+      # Read AccessorReportWindowStale first, for the same reason
+      # LibraryReportWindowStale and DriveReportWindowStale are listed first
+      # in their own blocks: if an accessor's windows have stopped
+      # advancing, every other tapelibrary_accessor_report_* series for it is
+      # still being served at face value.
+      #
+      # Its threshold is 3h15m, and the arithmetic is deliberate rather than
+      # a number copied from a sibling. Three missed hourly publications is
+      # the shared meaning across all three reports_* rules, but the
+      # exporter's own poll interval sits inside the measurement: this
+      # collector refreshes every 15m (--collector.reports_accessors.interval),
+      # so a perfectly healthy window can already be up to 15 minutes old
+      # before the exporter has fetched it. 3h + 15m restores the same real
+      # margin the library rule has at 3h and the drive rule has at 4h — the
+      # drive rule is larger only because that collector polls hourly, not
+      # because a drive deserves more slack than an accessor.
+      #
+      # This rule and AccessorReportShareCollapsed below are complementary
+      # and neither substitutes for the other: this one catches an accessor
+      # that stopped REPORTING, that one catches an accessor still reporting
+      # normally while doing no WORK.
+      - alert: AccessorReportWindowStale
+        expr: time() - tapelibrary_accessor_report_window_timestamp_seconds > 11700
+        for: 0m
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter accessor {{ $labels.location }} on library {{ $labels.library }} has published no report for over 3 hours'
+          description: 'Accessor {{ $labels.location }} on library {{ $labels.library }} last stamped an hourly report {{ $value | humanizeDuration }} ago. R1.11.2 publishes one window per accessor per completed hour, so three missed windows means this accessor has dropped out of the reporting path. A library has two accessors, so check whether its sibling is still reporting: if both are stale the reporting path stopped, and LibraryReportWindowStale would be firing too. Check tapelibrary_accessor_state and tapelibrary_accessor_drive_access for the same location. Every other tapelibrary_accessor_report_* series for this accessor is still serving its stale window at face value: do not read them as current until this clears.'
+
+      # Silent failover: one accessor's share of the library's robotics work
+      # collapses while its sibling absorbs the rest. This is the signal the
+      # cumulative counters on /v1/accessors cannot show — an accessor that
+      # has performed 2.7 million gets over its life and none this hour still
+      # reads as 2.7 million on tapelibrary_accessor_gets_total, moving
+      # imperceptibly, while the hourly window it stopped contributing to
+      # drops to zero immediately.
+      #
+      # A share rather than an absolute count, for the reason
+      # DriveReportUncorrectedErrors is one: what is abnormal is not a low
+      # number of gets, it is a low number of gets WHILE THE OTHER ACCESSOR
+      # IS BUSY. A quiet library is quiet on both.
+      #
+      # avg_over_time, not sum_over_time, and that is load-bearing rather
+      # than stylistic — the same point DriveReportUncorrectedErrors makes.
+      # These gauges are per-window values re-served on every scrape until
+      # the next refresh, so sum_over_time would count each hourly window
+      # once per scrape and make every figure below depend on
+      # scrape_interval. avg_over_time[24h] reads as "mean gets per hourly
+      # window over the last day" at any scrape interval.
+      #
+      # **The 10% share and the 20-get floor have no grounding in R1.11.2**,
+      # which enumerates no expected duty split at all, and they are flagged
+      # as such the same way LibraryReportNoMounts and
+      # DriveReportUncorrectedErrors are. What IS grounded is their position
+      # relative to the reference capture: across its four hourly windows the
+      # two accessors split the work 0.62/0.38, 0.52/0.48, 0.40/0.60 and
+      # 0.54/0.46, so an even split is not the norm and 40% is an ordinary
+      # low. 10% sits far below every observed value, which makes this a
+      # collapse rule rather than an imbalance rule. The floor is 20 gets per
+      # window library-wide against an observed 89-138, so it silences a
+      # genuinely idle library without ever silencing a working one.
+      #
+      # Two shapes make this safe on libraries unlike the reference fleet. On
+      # a single-accessor library the sole accessor's share is always 1.0, so
+      # the rule can never fire. On a fully idle one the division is 0/0 =
+      # NaN and the floor is false, so it cannot fire either — the same
+      # self-protection SlotPutRetryRateHigh relies on.
+      - alert: AccessorReportShareCollapsed
+        expr: |
+          (
+            sum without(gripper) (avg_over_time(tapelibrary_accessor_report_gets[24h]))
+              / on(job, instance, library) group_left()
+            sum by(job, instance, library) (avg_over_time(tapelibrary_accessor_report_gets[24h]))
+          ) < 0.10
+          and on(job, instance, library)
+          sum by(job, instance, library) (avg_over_time(tapelibrary_accessor_report_gets[24h])) > 20
+        for: 1h
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter accessor {{ $labels.location }} on library {{ $labels.library }} has stopped taking its share of the work'
+          description: 'Accessor {{ $labels.location }} on library {{ $labels.library }} performed only {{ $value | humanizePercentage }} of its library''s cartridge retrievals over 24 hours, while the library stayed busy. The reference fleet splits the work 40/60 or better between its two accessors, so this is one of them having effectively stopped while its sibling covers for it — the library keeps serving hosts, more slowly, and nothing else pages. Check tapelibrary_accessor_state for this location (gripper1Failed, gripper2Failed, scannerFailed and onlineStandby all produce this), then tapelibrary_accessor_drive_access and tapelibrary_accessor_cartridge_access for a blocking position. Compare tapelibrary_accessor_report_puts for the same location: gets and puts collapsing together is the accessor, gets alone is the gripper that retrieves.'
+
+      # No rule ships on the six environmental metrics, and the omission is
+      # forced by the hardware rather than chosen. The accessors on this
+      # fleet carry no temperature or humidity sensor and report null in
+      # every window of the reference capture, so any threshold written here
+      # would be untestable and unfireable. A site whose accessors DO report
+      # them should add the DriveReportTemperatureHigh pair against
+      # tapelibrary_accessor_report_temperature_max_celsius, reading the same
+      # allowable 32 °C ceiling from R1.11.2 — the reasoning in that rule's
+      # comment transfers unchanged, since both readings are taken inside the
+      # enclosure rather than at the ambient sensors the envelope is written
+      # for.
+      #
+      # Nothing ships on pivots, bar code scans or travel either. All three
+      # measure how much work the library was asked to do, so any threshold
+      # over them would page on a quiet week — the reason their library-wide
+      # and per-drive counterparts carry no rule. They earn their place as
+      # the denominator of a wear question (compare against the _total
+      # lifetime counterparts on AccessorsCollector) and as dashboard
+      # material, not as a page. tapelibrary_accessor_report_puts carries no
+      # rule of its own because it tracks gets closely enough that a second
+      # share rule would fire alongside the first and say nothing new; it is
+      # named in AccessorReportShareCollapsed's description as the thing to
+      # compare against instead.
+      #
+      # tapelibrary_accessor_report_window_duration_seconds carries no rule,
+      # for the reason its two siblings' counterparts do not.
+
+      # ──────────────────────────────────────────────────────────────────
       # EXAMPLE: business alert (commented out: not loaded by Prometheus)
       # ──────────────────────────────────────────────────────────────────
       # A business alert fires on what your collectors actually measure, so
