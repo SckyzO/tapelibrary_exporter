@@ -194,7 +194,6 @@ only need Docker or Podman, no host Go install required.
 
 <!-- BEGIN GENERATED COLLECTORS -->
 <!-- Regenerated from docs/metrics.md. Edits inside this block are overwritten. -->
-- [`example`](docs/metrics.md#examplecollector)
 - [`library`](docs/metrics.md#librarycollector)
 - [`frames`](docs/metrics.md#framescollector)
 - [`accessors`](docs/metrics.md#accessorscollector)

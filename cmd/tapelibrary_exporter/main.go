@@ -148,31 +148,16 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
 
-	// factories holds one entry per collector, in declaration order. scaffold.sh
-	// injects the starter at the marker below, and /add-collector appends every
-	// collector added later. Leave the marker in place.
+	// factories holds one entry per collector, in declaration order.
+	// /add-collector appends at the marker below; leave it in place.
+	//
+	// The scaffold's own starter collector was removed on 2026-08-03, once the
+	// nineteen real ones had landed and it was the only entry that never
+	// refreshed against a real library. It existed to be adapted into the first
+	// real collector or deleted after one arrived, which is what happened.
 	var factories []instance.Factory
 
 	// @@INSTANCE_FACTORIES@@
-	exampleTimeout := kingpin.Flag("collector.example.timeout", "Per-request timeout for the example collector. Calibrated 2026-08-03 against real hardware: this endpoint measures under 2s idle, but /v1/library was observed once at 45s and the SCSI buffer path makes latency unpredictable from payload size. A generous ceiling costs nothing when the endpoint is fast and is the difference between a served cache and a permanently empty one.").Default("60s").Duration()
-	exampleInterval := kingpin.Flag("collector.example.interval", "Background refresh interval for the example collector.").Default("5m").Duration()
-	exampleEnabled := kingpin.Flag("collector.example", "Enable the example collector.").Default("true").Bool()
-	// The closure defers every flag dereference and the log reference to the
-	// reconciler, which runs after kingpin.Parse() and after log is built. It no
-	// longer builds a transport: the Handle owns one per machine, shared by
-	// every collector, so a reload can swap it underneath them.
-	factories = append(factories, instance.Factory{
-		Name:    "example",
-		Enabled: exampleEnabled,
-		New: func(h *instance.Handle) (instance.BackgroundCollector, error) {
-			c, err := h.ClientFor(*exampleTimeout)
-			if err != nil {
-				return nil, err
-			}
-			return collector.NewExampleCollector(log, c, *exampleInterval), nil
-		},
-	})
-
 	libraryTimeout := kingpin.Flag("collector.library.timeout", "Per-request timeout for the library collector. Calibrated 2026-08-03 against real hardware: this endpoint measures under 2s idle, but /v1/library was observed once at 45s and the SCSI buffer path makes latency unpredictable from payload size. A generous ceiling costs nothing when the endpoint is fast and is the difference between a served cache and a permanently empty one.").Default("60s").Duration()
 	libraryInterval := kingpin.Flag("collector.library.interval", "Background refresh interval for the library collector.").Default("5m").Duration()
 	libraryEnabled := kingpin.Flag("collector.library", "Enable the library collector.").Default("true").Bool()

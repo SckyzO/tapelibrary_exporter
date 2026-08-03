@@ -30,7 +30,7 @@
 #      own collectors measure is specific to your target, so there is no
 #      single business alert that's honest for every exporter. The commented
 #      block teaches the same tiered pattern against the bundled
-#      ExampleCollector's placeholder metric instead of asserting a lie.
+#      a placeholder metric name instead of asserting a lie.
 #      `/add-collector` (if you have the scaffolding plugin available)
 #      proposes a real, uncommented alert here for every collector you add.
 
@@ -1810,9 +1810,8 @@ groups:
       # `promtool check rules` nor assert a metric that doesn't exist for
       # your flavor. It shows the same tiered warning/critical + `for:` +
       # portable-labels pattern as the health alerts above, applied to the
-      # bundled ExampleCollector as a worked example, replace the metric
-      # name and thresholds with your own once you adapt (or add, via
-      # /add-collector) a real collector:
+      # a placeholder metric name, replace it and the thresholds with your
+      # own when adding a collector via /add-collector:
       #
       #   - alert: ExampleTargetDegraded
       #     expr: tapelibrary_your_metric_name > 100          # replace with your metric + threshold
@@ -1834,9 +1833,7 @@ groups:
       #       summary: 'tapelibrary_exporter target critically degraded'
       #       description: '{{ $labels.instance }} has reported {{ $value }} for 10 minutes (threshold: 500).'
       #
-      # The bundled ExampleCollector itself emits tapelibrary_items /
-      # tapelibrary_healthy (HTTP flavor) or tapelibrary_example /
-      # tapelibrary_example_entries (CLI flavor). See docs/metrics.md for
-      # the pair your flavor actually ships. `/add-collector` (if you have
-      # the scaffolding plugin available) proposes a real, uncommented
-      # alert here for every collector's own metrics as you add them.
+      # Every collector this exporter ships already has real, uncommented
+      # rules above; see docs/metrics.md for the metrics they read.
+      # `/add-collector` proposes one here for each new collector's own
+      # metrics as they are added.

@@ -105,7 +105,7 @@ sleep 1
 nohup bin/tapelibrary_exporter \
   --web.listen-address=:9170 \
   --log.level=debug \
-  --collector.example \
+  --collector.drives \
   > /tmp/exporter.log 2>&1 &
 sleep 2
 curl -s http://localhost:9170/healthz

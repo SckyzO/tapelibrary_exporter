@@ -30,19 +30,6 @@ Standard Go runtime, process, and build-info metrics (from
 are intentionally not listed here.
 -->
 
-## ExampleCollector
-
-Defined in `internal/collector/collector.go`, the background-refresh variant: a
-goroutine polls the target on `--collector.example.interval` and every scrape
-serves the last cached result. Replace this section's rows when you adapt
-`ExampleCollector` into your real collector.
-
-| Metric | Type | Labels | Description |
-|---|---|---|---|
-| `tapelibrary_items` | Gauge | - | Number of items reported by the example target. |
-| `tapelibrary_healthy` | Gauge | - | Whether the example target reports itself healthy (1) or not (0). |
-| `tapelibrary_example_last_refresh_timestamp_seconds` | Gauge | - | Unix time of the last successful example refresh. Alert if time() minus this exceeds 2x the collector's configured interval. |
-
 ## LibraryCollector
 
 Defined in `internal/collector/library.go`, the background-refresh variant: a
@@ -1294,7 +1281,7 @@ per-metric enable/disable flag for its own self-instrumentation. See
 ## The instance label
 
 This exporter watches every instance listed in its `--config.file` and serves
-them all through one `/metrics`. The ExampleCollector metrics and the
+them all through one `/metrics`. Every collector's metrics and the
 per-collector health metrics (`tapelibrary_exporter_collector_success` /
 `_duration_seconds`) additionally carry the `library` label (plus any
 per-instance labels you declare), applied by the exporter per instance rather

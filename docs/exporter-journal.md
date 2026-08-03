@@ -777,9 +777,14 @@ replaces the live legacy alerting soonest), then inventory, then the heavy
 aggregates, then the hourly report windows. **Every entry is the `background`
 variant** — `multi-instance` admits no other.
 
-- [x] `example`  background  built 2026-07-31 — the scaffold's own starter collector,
-      documented as `## ExampleCollector` in `docs/metrics.md`. Not a TS4500 resource:
-      it exists to be adapted into the first real collector, or removed once one lands.
+- [x] `example`  background  built 2026-07-31, **REMOVED 2026-08-03** — the scaffold's
+      own starter collector. Never a TS4500 resource: it existed to be adapted into the
+      first real collector or deleted once one landed, and this entry always said so.
+      Nineteen real collectors landed, and the first run against a real library made the
+      case concrete: it was the only registered collector that never refreshed, because
+      it polls `/library` under a second name and had nothing of its own to report. Kept
+      on this list rather than deleted from it, so the count below reads against the
+      right denominator and a later session does not rediscover it as a gap.
 - [x] `library`  background  built 2026-07-31 — `GET /v1/library`
 - [x] `frames`  background  built 2026-07-31 — `GET /v1/frames`
 - [x] `accessors`  background  built 2026-07-31 — `GET /v1/accessors`

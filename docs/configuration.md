@@ -50,16 +50,13 @@ Prometheus itself uses.
 | `--probe.timeout` | *(multi-target builds only)* Ceiling on each `/probe` request's own deadline | `5s` |
 | `--probe.timeout-offset` | *(multi-target builds only)* Subtracted from Prometheus's scrape timeout when computing a probe's deadline, so the exporter answers before Prometheus abandons the scrape | `0.5s` |
 
-In **single-target builds**, individual collectors may also expose their own flags. The bundled `example` collector does:
-
-| Flag | Description | Default | Flavor |
-|------|-------------|---------|--------|
-| `--collector.example.timeout` | Per-request/per-command timeout for the `example` collector | `5s` | HTTP and CLI |
-| `--collector.example.target` | Base URL the `example` collector fetches | `https://<library-address>/web/api/v1` | HTTP only |
-
-In **multi-target builds** (`--target-model multi`), the `example` collector is built fresh per `/probe` request: its target and timeout come from the request (bounded by the `--probe.*` flags above), so it exposes no `--collector.example.*` flags, and multi has no `--[no-]collector.<name>` toggle.
-
-In **multi-instance builds** (`--target-model multi-instance`), the `example` collector is the background-refresh variant: `--collector.example.timeout` and `--collector.example.interval` (background refresh period, default `5m`) apply the same way to every watched instance, but there is no `--collector.example.target`, since each instance's address comes from `instances:` in the configuration file (see below), not a flag. `--[no-]collector.example` still toggles it on or off, same as single-target.
+This is a **multi-instance** build, so every collector is the background-refresh
+variant: `--collector.<name>.timeout` bounds one request and
+`--collector.<name>.interval` sets how often the poller refreshes, both applying
+identically to every watched instance. There is no `--collector.<name>.target`,
+since each instance's address comes from `instances:` in the configuration file
+(see below) rather than from a flag, and `--[no-]collector.<name>` toggles the
+collector on or off.
 
 This build's own collectors follow that same multi-instance pattern:
 
@@ -128,15 +125,14 @@ This build's own collectors follow that same multi-instance pattern:
 | `--[no-]collector.diagnostic_cartridges` | Enable or disable the `diagnostic_cartridges` collector | enabled |
 | `--collector.data_cartridges_lifetime.per-volser` | Emit the four per-cartridge lifetime counter families (`_motion_meters_total`, `_mounts_total`, `_written_bytes_total` and the four `_errors_total` combinations), one set per data cartridge. Off by default, like `--collector.data_cartridges.per-volser`, and the largest per-object cost in the exporter: seven series per cartridge against that flag's three, so ~68 250 extra series per library and ~341 000 across a five-library fleet. Turning it on adds those four families and changes no aggregate, so no alert depends on it — it is what names *which* cartridge a rising uncorrected-error count comes from | `false` |
 
-There is no single global command/request timeout: each collector owns its own, following
-the `example` collector's pattern above. Run `--help` after adding your own collectors to see
-the full, current flag list.
+There is no single global command/request timeout: each collector owns its own, on the
+pattern above, so a slow endpoint can be given room without loosening every other one.
+Run `--help` to see the full, current flag list.
 
 ### Available collectors
 
 | Collector | Default | Description |
 |-----------|---------|-------------|
-| `example` | enabled | Starter collector: replace with your real data source (see `CONTRIBUTING.md`) |
 | `library` | enabled | Library status, capacity and cartridge counters, and identity, from `GET /v1/library` |
 | `frames` | enabled | Per-frame state, door positions, slot/cartridge/drive/IO-station counts and identity, from `GET /v1/frames` |
 | `accessors` | enabled | Per-accessor state, drive/cartridge reachability, and lifetime robotics counters, from `GET /v1/accessors` |
@@ -158,8 +154,8 @@ the full, current flag list.
 | `http_client_requests` *(HTTP flavor)* | enabled | Self-instrumentation: HTTP request duration by outcome |
 | `command_exec` *(CLI flavor)* | enabled | Self-instrumentation: command execution duration by outcome |
 
-Both the `example` collector and the self-instrumentation histogram are registered through the
-same `--[no-]collector.<name>` mechanism: there is nothing special about self-instrumentation
+Collectors and the self-instrumentation histogram are registered through the same
+`--[no-]collector.<name>` mechanism: there is nothing special about self-instrumentation
 from the flag's point of view.
 
 ### Enabling and disabling collectors
@@ -176,7 +172,7 @@ Use `--[no-]collector.<name>` (kingpin boolean syntax) to enable or disable a co
 
 ```bash
 ./tapelibrary_exporter \
-  --collector.example.timeout=10s \
+  --collector.drives.timeout=10s \
   --log.level=debug \
   --log.format=json
 ```
@@ -544,7 +540,7 @@ promtool check-config prometheus.yml
 
 ### Internal exporter metrics
 
-Every collector, including the bundled `example` one, is wrapped by a shared status tracker
+Every collector is wrapped by a shared status tracker
 that emits two self-monitoring metrics regardless of what the collector itself reports:
 
 | Metric | Description | Labels |

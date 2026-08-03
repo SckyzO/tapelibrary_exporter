@@ -31,7 +31,7 @@ Everything in `alerts.yml` follows the same shape:
   specific to your target, so there is no version of a business alert
   that's true out of the box for every exporter. The commented block at the
   bottom of `alerts.yml` teaches the same warning/critical + `for:` +
-  portable-labels pattern against the bundled `ExampleCollector`'s metric.
+  portable-labels pattern against a placeholder metric name.
   Uncomment and adapt it, or add a new one, as you build real collectors.
   `/add-collector` (if you have the scaffolding plugin available) proposes
   a real alert here for every collector's own metrics as you add them.
