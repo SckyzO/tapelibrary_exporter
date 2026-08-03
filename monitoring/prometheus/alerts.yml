@@ -1626,6 +1626,76 @@ groups:
       # for the reason its two siblings' counterparts do not.
 
       # ──────────────────────────────────────────────────────────────────
+      # Health: collector freshness (every background collector)
+      # ──────────────────────────────────────────────────────────────────
+      # These two read the freshness gauge every background collector emits,
+      # and they exist because tapelibrary_exporter_collector_success does
+      # NOT answer the question an operator thinks it answers.
+      #
+      # StatusTracker counts the metrics a collector emits per scrape, and a
+      # background collector always emits its freshness gauge — deliberately,
+      # so the startup window before the first refresh is not reported as a
+      # failure. The consequence is that a collector whose every refresh has
+      # failed since boot still reports success=1. That is not hypothetical:
+      # on 2026-08-03, run against a real library for the first time, all
+      # eighteen collectors reported success=1 while every one of their
+      # refreshes was timing out and every freshness gauge read 0.
+      #
+      # Matched by metric NAME PATTERN rather than one rule per collector.
+      # Eighteen near-identical rules would drift the moment /add-collector
+      # adds a nineteenth, and this shape covers a new collector the day it
+      # ships without anyone remembering to come back here.
+      #
+      # A gauge reading exactly 0 means NO refresh has ever completed since
+      # this process started: Collect emits 0 rather than a zero time.Time's
+      # Unix(), precisely so this case is distinguishable. It needs no
+      # threshold and no per-collector tuning, which is what makes it the
+      # rule that would have caught the failure above on the first scrape.
+      # 15m of `for` covers a slow first refresh on the heavy endpoints
+      # without waiting out a whole interval.
+      - alert: CollectorNeverRefreshed
+        expr: '{__name__=~"tapelibrary_.+_last_refresh_timestamp_seconds"} == 0'
+        for: 15m
+        labels:
+          severity: critical
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter has never completed a refresh for {{ $labels.__name__ }} on library {{ $labels.library }}'
+          description: 'No refresh of {{ $labels.__name__ }} has EVER succeeded on library {{ $labels.library }} since this exporter started, so every series that collector owns is absent and its cache is empty. Note that tapelibrary_exporter_collector_success will still read 1 for it: that metric reports whether Collect returned data, and the freshness gauge alone satisfies it. Check the exporter log for the refresh error. The usual causes are a timeout too short for the endpoint (see docs/exporter-journal.md for measured per-endpoint latencies), credentials the library rejects, or the library refusing a new session.'
+
+      # The stale counterpart: refreshes DID work and then stopped. The
+      # threshold is deliberately loose and shared, because the intervals it
+      # has to cover are not: 5m for most collectors, 15m for reports_library
+      # and reports_accessors, 1h for reports_drives. 4h clears twice the
+      # slowest interval, so it is a safety net for "this collector died",
+      # never a tight per-collector staleness check.
+      #
+      # It is NOT a substitute for the per-collector window rules
+      # (LibraryReportWindowStale and friends), which watch whether the
+      # LIBRARY's data is advancing. This one watches whether the EXPORTER is
+      # still fetching. The two fail independently and both are needed: a
+      # refresh can keep succeeding against a library that has stopped
+      # publishing, which is the whole reason those rules exist.
+      # Written as `gauge < time() - 14400` rather than the more obvious
+      # `time() - gauge > 14400`, and that is load-bearing rather than a
+      # style choice. Prometheus DROPS the metric name across an arithmetic
+      # operator, so subtracting the gauge from time() would leave every
+      # alert unable to say WHICH collector is stale — the annotations below
+      # read $labels.__name__, and it would be empty. Comparing the gauge
+      # against a scalar expression instead is a filter, which keeps the
+      # metric name and every label. $value is then the refresh TIMESTAMP,
+      # not an age, hence humanizeTimestamp rather than humanizeDuration.
+      - alert: CollectorRefreshStale
+        expr: '{__name__=~"tapelibrary_.+_last_refresh_timestamp_seconds"} < time() - 14400 and {__name__=~"tapelibrary_.+_last_refresh_timestamp_seconds"} > 0'
+        for: 0m
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter has not refreshed {{ $labels.__name__ }} on library {{ $labels.library }} for over 4 hours'
+          description: '{{ $labels.__name__ }} on library {{ $labels.library }} last refreshed at {{ $value | humanizeTimestamp }}, having refreshed successfully at some point before that. Every series that collector owns is being served from a cache that old, at face value and with no indication on the series themselves. The slowest configured interval in this exporter is 1h, so 4 hours means the refreshes have stopped rather than merely slowed. The `> 0` guard keeps this distinct from CollectorNeverRefreshed, which covers the never-worked case at critical.'
+
+      # ──────────────────────────────────────────────────────────────────
       # EXAMPLE: business alert (commented out: not loaded by Prometheus)
       # ──────────────────────────────────────────────────────────────────
       # A business alert fires on what your collectors actually measure, so

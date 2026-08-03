@@ -2531,6 +2531,78 @@ library, so it exercises perhaps a third of the enumerated states.
   inventory endpoints, an hourly tier for `reports_*`), with calibrated defaults
   shipped in code and overridable in configuration. Re-measure before fixing the
   defaults.
+  - **Measured 2026-08-03 against `library1`, and this time written down.** Taken
+    with `curl` through an SSH SOCKS5 tunnel, one request at a time, on an
+    otherwise **idle** library with the exporter stopped — so these are floors,
+    not working figures. Latency is **not** driven by payload size, which is the
+    single most useful thing on this list: `/v1/library` returns 762 bytes and
+    `/v1/fcPorts` returns 23 KB, and the small one is the slower of the two.
+    The endpoints that are slow are slow because the library computes something.
+
+    | endpoint | measured | bytes | shipped timeout | headroom |
+    |---|---|---|---|---|
+    | `POST /v1/login` | 3.1s | — | (inside the first request's budget) | — |
+    | `/v1/library` | 1.4s / 5.2s / **45.5s** | 762 | 5s | **negative, and unstable** |
+    | `/v1/frames` | 2.7s | 4 448 | 5s | 1.9x |
+    | `/v1/accessors` | 1.9s | 823 | 5s | 2.6x |
+    | `/v1/drives` | 1.9s | 19 182 | 5s | 2.7x |
+    | `/v1/powerSupplies` | 1.5s | 436 | 5s | 3.4x |
+    | `/v1/nodeCards` | 1.8s | 2 656 | 5s | 2.8x |
+    | `/v1/ioStations` | 1.5s | 810 | 5s | 3.4x |
+    | `/v1/fcPorts` | 2.5s | 23 019 | 5s | 2.0x |
+    | `/v1/reports/library` | 2.0s | 57 521 | 5s | 2.5x |
+    | `/v1/reports/accessors` | 2.5s | 123 576 | 60s | 24x |
+    | `/v1/slots` | 23.7s | 661 176 | 30s | 1.3x |
+    | `/v1/reports/drives` | 49.8s | 2 906 789 | 60s | **1.2x** |
+    | `/v1/dataCartridges` | **> 300s** | — | 60s | **cannot ever succeed** |
+
+    `logical_libraries`, `cleaning_cartridges`, `events` and
+    `data_cartridges/lifetimeMetrics` were not measured; the last is expected to
+    behave like `dataCartridges`.
+
+    **Three conclusions, none of which this session acted on.** (1) The 5s default
+    is wrong for every endpoint that carries it: 1.5–2.7s idle leaves under 2x
+    headroom before any contention, and `/v1/library` already exceeds it. (2)
+    `data_cartridges` **cannot succeed at 60s** and has therefore never worked
+    against this fleet; `data_cartridges_lifetime` is presumed the same. (3)
+    `reports_accessors` is the one collector whose defaults these numbers
+    *confirm* — 2.5s against a 60s timeout, and 123 KB against the ~148 KB the
+    build estimated.
+- **The concurrency ceiling decided in `## Architecture decisions` is not the
+  shipped default** (found 2026-08-03). That section fixes it at 1, and
+  `--exporter.max-requests-per-target` defaults to **0, meaning unlimited**. The
+  consequence is not theoretical: run against `library1`, all eighteen collectors
+  fire their first refresh simultaneously against a machine whose LCC and robotics
+  paths serialize internally, and **every one of them fails with
+  `context deadline exceeded`** — including the ones with 60s budgets.
+  **Setting the default to 1 is necessary but not sufficient**, which is why it was
+  not simply changed. With a ceiling of 1 the queue wait is charged against each
+  collector's own timeout (see `Client.Fetch`, which applies `c.timeout` to the
+  context *before* `acquire`), and the measured latencies above sum past 400s, so
+  eighteen collectors starting together would still starve each other. The fix has
+  three parts that must land together: the ceiling at 1, a staggered or jittered
+  first refresh so the boot storm spreads, and timeouts sized against the table
+  above rather than against a shared 5s. Decide all three at once.
+- **`success=1` is emitted while nothing works** (found 2026-08-03, and the most
+  serious observability gap in this exporter). `StatusTracker` counts the metrics a
+  collector emits per scrape, and a background collector ALWAYS emits its
+  `..._last_refresh_timestamp_seconds` gauge — by design, so that the startup
+  window before the first refresh is not reported as a failure. The consequence is
+  that a collector whose every refresh has failed since boot still reports
+  `tapelibrary_exporter_collector_success{collector="…"} 1`. Observed on all
+  eighteen collectors at once during the run above: eighteen `success=1`, eighteen
+  freshness gauges reading `0`, and no data at all.
+  **The freshness gauge is the real health signal and nothing reads it.** Before
+  2026-08-03 the eighteen gauges appeared in `monitoring/prometheus/alerts.yml`
+  exactly once, inside a comment. The `== 0` case is unambiguous and needs no
+  threshold — it means no refresh has EVER completed — and is what would have
+  caught this immediately.
+  **Why the test suite could not have caught any of this**, which is the part worth
+  carrying forward: every collector test points at an `httptest` server that
+  answers 200 instantly. No latency, no contention, no authentication. A suite
+  built that way is silent on timeouts, on ceilings, and on auth — the three things
+  that were actually broken. The fake library added in `session_test.go` closes the
+  auth third; the other two remain untested by construction.
 - **`cleaning_cartridges` is asymmetric on purpose.** It is the only collector
   emitting `volser` by default. The asymmetry is justified by population size, not by
   the resource's nature; if a site runs cleaning cartridges in the thousands, the same
