@@ -1333,7 +1333,40 @@ are stateset encoding; only the second is affordable at inventory scale.
   no alert loses its input.
   **Fleet impact: ~115 series across five libraries.**
 
-**Fleet totals.** Defaults: ~2 425 series per library, **~12 150 across five
+**Fleet totals, MEASURED 2026-08-03 against all five libraries.** The estimate
+below stood for a month and was wrong by half, for a reason no capture could
+have shown: **this fleet is not homogeneous.** Every figure in this section was
+derived from `library1` and multiplied by five.
+
+| library | drives | FC ports | frames | cartridges | **series** |
+|---|---|---|---|---|---|
+| `library1` | 40 | 80 | 12 | 9 749 | 2 637 |
+| `library2` | 40 | 80 | 11 | 8 779 | 2 566 |
+| `library3` | 64 | 128 | 11 | 8 401 | 3 636 |
+| `library4` | 64 | 128 | 11 | 8 378 | 3 703 |
+| `library5` | 96 | 192 | 15 | 11 405 | 5 473 |
+| **fleet** | **304** | **608** | **60** | **46 712** | **18 015** |
+
+Plus 44 series of self-instrumentation, for **18 059 on `/metrics`**.
+
+**Observed 18 015 against the ~12 150 planned, +49%, and drives are the whole
+of it.** The budget assumed 200 drives (40 x 5); the fleet has 304, and
+`library5` alone carries 96. Drives are also the most expensive object here,
+at 18 stateset series each before anything else (`_state` 9 + `_operation` 6 +
+`_access` 3), so the three largest families on the wire are
+`tapelibrary_drive_state` (2 736), `tapelibrary_fc_port_state` (2 432) and
+`tapelibrary_drive_operation` (1 824) — 39% of the fleet total between them.
+FC ports track drives at exactly 2:1 on all five machines.
+
+**The rule for anyone re-running this arithmetic: size a per-object budget from
+the LARGEST member, not from the one that happened to be captured.** `library5`
+is 2.1x `library2`, and nothing in the 2026-07-28 capture hinted at it.
+
+Even so the conclusion the estimate drew still holds, which is why it is
+corrected rather than rewritten: 18 059 series is comfortable, and the reason
+to keep the three per-item flags off by default is unchanged.
+
+**Superseded estimate.** Defaults: ~2 425 series per library, **~12 150 across five
 libraries** — comfortable. With all three per-item flags enabled: ~142 800 per
 library, **~714 000 across five**, which is a Prometheus sizing decision in its own
 right and the reason all three default to `false`.
@@ -2673,6 +2706,23 @@ library, so it exercises perhaps a third of the enumerated states.
   a key is actually used.** A response that cannot be keyed for one family is
   not necessarily unusable for the others, and refusing it wholesale trades
   everything for the part that is ambiguous.
+- **The five libraries have been reached, all at once, and the multi-instance
+  model works** (2026-08-03). One process, five instances, one shared account,
+  the SOCKS tunnel in front of all of them: **90 of 90 collectors populated,
+  zero errors**. This is the first time anything beyond `library1` was
+  contacted, and it exercised three things nothing else had. The per-instance
+  limiters really are independent — the five libraries drained their queues at
+  visibly different rates (18/18, 15/18, 12/18, 10/18, 3/18 at one point) with
+  no interference. One RoE session per machine, five in total, well inside the
+  ~100 the manual documents. And `--instance-label library` carries cleanly:
+  every series is attributed, and the only unlabelled ones are the exporter's
+  own self-instrumentation, as designed.
+  **Two things this contradicted.** The fleet is NOT homogeneous (see
+  `## Cardinality budget`, corrected the same day), and the duplicated volser
+  that took out `data_cartridges_lifetime` exists on `library1` ONLY — the
+  other four report zero. So it is a site-specific data-quality fault on one
+  machine rather than a property of the endpoint, which is exactly what
+  `DataCartridgeDuplicateVolser` was shaped to say.
 - **The concurrency ceiling decided in `## Architecture decisions` is not the
   shipped default** (found 2026-08-03). That section fixes it at 1, and
   `--exporter.max-requests-per-target` defaults to **0, meaning unlimited**. The
