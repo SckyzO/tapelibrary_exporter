@@ -13,6 +13,7 @@ import (
 	"github.com/alecthomas/kingpin/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
+	versioncollector "github.com/prometheus/client_golang/prometheus/collectors/version"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/version"
 	"github.com/prometheus/exporter-toolkit/web"
@@ -697,7 +698,24 @@ func main() {
 
 	// Custom registry (no global state or third-party metric pollution).
 	reg := prometheus.NewRegistry()
+	// Two build-info collectors, and they answer different questions.
+	//
+	// NewBuildInfoCollector emits go_build_info: Go's own module metadata, a
+	// pseudo-version derived from the commit. NewCollector emits
+	// tapelibrary_exporter_build_info, this exporter's identity as stamped by
+	// the Makefile's ldflags — version, branch, revision, build user, build
+	// date, Go version. That second one is the Prometheus convention every
+	// standard exporter follows, and it was missing until 2026-08-04: the only
+	// way to tell which build was running was to read a Go pseudo-version and
+	// decode the commit hash out of it, which is exactly what someone had to do
+	// on the first deployment.
+	//
+	// Registered outside the --web.disable-exporter-metrics guard below, like
+	// go_build_info already is: this is identity, not runtime instrumentation.
+	// An operator who trims Go and process metrics still needs to know what is
+	// running.
 	reg.MustRegister(collectors.NewBuildInfoCollector())
+	reg.MustRegister(versioncollector.NewCollector("tapelibrary_exporter"))
 	if !*disableExporterMetrics {
 		reg.MustRegister(
 			collectors.NewGoCollector(),

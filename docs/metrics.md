@@ -1278,6 +1278,21 @@ per-metric enable/disable flag for its own self-instrumentation. See
 | `tapelibrary_exporter_collector_success` | Gauge | `collector` | Whether the last scrape of the collector succeeded (1=success, 0=failure). Defined in `internal/collector/status_tracker.go`. |
 | `tapelibrary_exporter_collector_duration_seconds` | Gauge | `collector` | Duration of the last scrape for the collector, in seconds. Defined in `internal/collector/status_tracker.go`. |
 
+**`tapelibrary_exporter_build_info` is emitted too, and is deliberately not in
+the table above.** That table is exactly what `internal/collector/*.go` defines,
+which is the invariant `make docs-check` enforces; this one comes from
+`client_golang`'s own version collector, registered in `cmd/*/main.go`, so
+documenting it as a row would fail the check for a metric that is nonetheless
+real. It is a Gauge, always `1`, carrying `version`, `revision`, `branch`,
+`goversion`, `goos`, `goarch` and `tags` — this exporter's identity as stamped
+by the Makefile's ldflags.
+
+Distinct from `go_build_info`, which carries Go's module metadata as a
+pseudo-version: `tapelibrary_exporter_build_info` is the one to join against in
+a dashboard, and the one that answers "which build is running" without decoding
+a commit hash out of a pseudo-version. Both are emitted regardless of
+`--web.disable-exporter-metrics`, since identity is not runtime instrumentation.
+
 ## The instance label
 
 This exporter watches every instance listed in its `--config.file` and serves
