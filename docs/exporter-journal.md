@@ -2239,6 +2239,28 @@ were resolved by contradicting what they originally assumed.
   `promtool check rules` step — the Docker invocation used here works with no host
   install — would have caught this on the day it shipped. Do that before the next
   collector's rules are written.
+  - **Both halves closed 2026-08-04.** The `group_left ()` fix had in fact been
+    applied at some point after this note was written, and the note went stale
+    rather than the bug persisting — confirmed by loading the file the way
+    Prometheus itself does, which is the second half.
+    **`make check` now runs `promtool check rules`**, as a `rules-check` target,
+    and the gap this entry named is gone. Two properties were verified by
+    breaking the file on purpose and watching the gate fail: the historic
+    `group_left` parse error reproduces the exact message recorded above
+    (`801:15 … unexpected "{" in grouping opts`) and exits non-zero, and a
+    malformed annotation template (`humanizeNothing`) is caught too — a class
+    that parsing expressions one at a time cannot see at all, and the class
+    this session was most likely to introduce, having added
+    `{{ $labels.__name__ }}` and `humanizeTimestamp` to new rules.
+    It also turned up `monitoring/prometheus/rules.yml`, a recording rule that
+    no check had ever looked at.
+    **promtool comes from the release tarball, not `go install`**: the
+    Prometheus `go.mod` carries replace directives, so `go install
+    github.com/prometheus/prometheus/cmd/promtool@latest` is refused outright.
+    It is therefore the one pinned tool in an image that otherwise floats on
+    `@latest`, and its download is checksum-verified against the `sha256sums.txt`
+    published beside it — a prebuilt binary gets none of the guarantees Go's
+    checksum database gives the others.
 - `[OPEN]` **Every logical library on this fleet reports `encryptionMethod: "none"`.**
   Both partitions in the 2026-07-28 capture, and therefore presumably all ten
   across the five libraries. This is configuration state rather than a defect,

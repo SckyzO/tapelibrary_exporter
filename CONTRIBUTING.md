@@ -75,7 +75,7 @@ This applies equally to external contributions and to work by a regular maintain
    -> No unexpected ERROR or WARN entries during the run above.
 
 9. CI-local green
-   -> make check    # vet + lint + test + vuln + actionlint + zizmor + deadcode + docs-check, containerized
+   -> make check    # vet + lint + test + vuln + actionlint + zizmor + deadcode + docs-check + rules-check, containerized
 ```
 
 ### Shortcut for small changes

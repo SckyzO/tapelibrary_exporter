@@ -32,7 +32,7 @@ toolchain (`scripts/docker/tools/`). The only host requirement is a container en
 ```bash
 cd "$(git rev-parse --show-toplevel)"
 git status --short
-make check      # vet + lint + test + vuln + actionlint + zizmor + deadcode + docs-check, containerized
+make check      # vet + lint + test + vuln + actionlint + zizmor + deadcode + docs-check + rules-check, containerized
 make report     # offline goreportcard.com equivalent, containerized
 make build      # full ldflags build (produces bin/tapelibrary_exporter)
 bin/tapelibrary_exporter --version; echo "exit=$?"

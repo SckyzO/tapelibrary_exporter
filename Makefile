@@ -169,6 +169,26 @@ vuln: native-warning tools-image
 # only found once a --forge github scaffold's real workflow content made it
 # to this target - guarded the same way, with its own distinct message,
 # rather than one skip reason silently covering two different causes.
+# Validates the shipped Prometheus rule files with promtool.
+#
+# This is not a style check. Prometheus rejects an ENTIRE rule file on a single
+# parse error, so one malformed expression takes down every alert the exporter
+# ships, silently: the file simply never loads. That is not hypothetical here —
+# a `group_left` followed by a parenthesised operand did exactly that, and the
+# whole rule set sat dead for two days because no gate looked at it.
+#
+# promtool checks what parsing expressions one at a time cannot: the YAML
+# structure, duplicate rule names, and the Go templates in `annotations`, which
+# is where `{{ $labels.… }}` and `{{ $value | humanize… }}` mistakes live.
+.PHONY: rules-check
+rules-check: native-warning tools-image
+	@if [ ! -d monitoring/prometheus ]; then \
+	  echo "Skipping rules-check: no monitoring/prometheus/ found"; \
+	else \
+	  echo "Running promtool check rules (monitoring/prometheus/*.yml)"; \
+	  $(IN_TOOLS) -c 'promtool check rules monitoring/prometheus/*.yml'; \
+	fi
+
 .PHONY: actionlint
 actionlint: native-warning tools-image
 	@if [ ! -d .github/workflows ]; then \
@@ -233,7 +253,7 @@ docs-check: native-warning tools-image
 
 # Full pre-commit / pre-release verification gate - mirrors what CI runs.
 .PHONY: check
-check: vet lint test vuln actionlint zizmor deadcode docs-check
+check: vet lint test vuln actionlint zizmor deadcode docs-check rules-check
 
 # `lint` (above) and `report` (below) deliberately overlap: gofmt, go vet,
 # ineffassign, and misspell are each covered by both. That's by design, not

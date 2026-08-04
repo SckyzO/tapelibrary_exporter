@@ -19,6 +19,11 @@ FROM golang:1.26.5-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149a
 
 # shellcheck  → used by actionlint to lint `run:` shell blocks
 # zizmor      → static analysis (security) for GitHub Actions workflows
+# promtool    → validates monitoring/prometheus/*.yml, used by `make rules-check`.
+#               Prometheus rejects an ENTIRE rule file on one parse error, so a
+#               single malformed expression silently kills every alert this
+#               exporter ships. That happened once and went unnoticed for two
+#               days, because nothing in `make check` looked at the rules.
 # build-base  → C toolchain (gcc): `go test -race` requires cgo
 RUN apk add --no-cache git bash curl ca-certificates findutils \
         shellcheck zizmor build-base
@@ -56,6 +61,21 @@ RUN go install github.com/fzipp/gocyclo/cmd/gocyclo@latest \
  && go install github.com/google/osv-scanner/v2/cmd/osv-scanner@latest \
  && go install golang.org/x/tools/cmd/deadcode@latest \
  && go clean -cache -modcache -testcache
+
+# promtool comes from the release tarball, not `go install`: the Prometheus
+# go.mod carries replace directives, so `go install
+# github.com/prometheus/prometheus/cmd/promtool@latest` is refused outright
+# ("must not contain directives that would cause it to be interpreted
+# differently than if it were the main module"). That is a long-standing
+# property of that repository, not a transient breakage.
+#
+# Pinned, unlike the `go install` block above, and deliberately so: those pull
+# source Go verifies against the checksum database, while this pulls a
+# prebuilt binary. Version and digest are checked against the sha256sums file
+# published beside it in the same release, so a truncated or swapped download
+# fails the build instead of silently shipping.
+ARG PROMTOOL_VERSION=3.7.3
+RUN set -eu;     case "$(go env GOARCH)" in       amd64) PT_ARCH=amd64 ;;       arm64) PT_ARCH=arm64 ;;       *) echo "unsupported arch for promtool: $(go env GOARCH)" >&2; exit 1 ;;     esac;     PT="prometheus-${PROMTOOL_VERSION}.linux-${PT_ARCH}";     BASE="https://github.com/prometheus/prometheus/releases/download/v${PROMTOOL_VERSION}";     curl -fsSL -o /tmp/p.tgz "${BASE}/${PT}.tar.gz";     curl -fsSL -o /tmp/sums "${BASE}/sha256sums.txt";     (cd /tmp && grep " ${PT}.tar.gz$" sums | sed "s| .*| p.tgz|" | sha256sum -c -);     tar -xzf /tmp/p.tgz -C /tmp "${PT}/promtool";     install -m 0755 "/tmp/${PT}/promtool" /go/bin/promtool;     rm -rf /tmp/p.tgz /tmp/sums "/tmp/${PT}";     promtool --version
 
 # All tools land in /go/bin which is already on $PATH.
 WORKDIR /repo
