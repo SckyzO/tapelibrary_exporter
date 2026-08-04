@@ -18,6 +18,16 @@ are a Grafana concern** (this repo ships one, health, plus the pattern to
 build your own). See [Observability](../README.md#observability) for where
 this fits among the rest of the exporter's docs.
 
+## Scraping this exporter
+
+`prometheus/scrape-config.example.yml` is the `scrape_configs` entry to copy into
+your own `prometheus.yml`, with the two rule files beside it.
+
+**One target, not one per library.** A single exporter process watches every
+library in its `--config.file` and serves them all through one `/metrics`, so
+`instance` is the exporter's host and `library` is the machine. Group and alert
+by `library`.
+
 ## Two tiers, one pattern
 
 Everything in `alerts.yml` follows the same shape:

@@ -180,13 +180,22 @@ vuln: native-warning tools-image
 # promtool checks what parsing expressions one at a time cannot: the YAML
 # structure, duplicate rule names, and the Go templates in `annotations`, which
 # is where `{{ $labels.… }}` and `{{ $value | humanize… }}` mistakes live.
+#
+# `*.example.yml` is excluded by convention rather than by name: that directory
+# also holds a scrape-config fragment, which is YAML for Prometheus but is not
+# a rule file, and promtool rightly refuses it. Excluding one filename would
+# have re-broken the moment a second example landed. Anything else matching
+# *.yml there IS treated as a rule file and must parse.
 .PHONY: rules-check
 rules-check: native-warning tools-image
 	@if [ ! -d monitoring/prometheus ]; then \
 	  echo "Skipping rules-check: no monitoring/prometheus/ found"; \
 	else \
-	  echo "Running promtool check rules (monitoring/prometheus/*.yml)"; \
-	  $(IN_TOOLS) -c 'promtool check rules monitoring/prometheus/*.yml'; \
+	  echo "Running promtool check rules (monitoring/prometheus/*.yml, excluding *.example.yml)"; \
+	  $(IN_TOOLS) -c 'set -eu; \
+	    files=$$(find monitoring/prometheus -maxdepth 1 -name "*.yml" ! -name "*.example.yml" | sort); \
+	    if [ -z "$$files" ]; then echo "Skipping rules-check: no rule files found"; exit 0; fi; \
+	    promtool check rules $$files'; \
 	fi
 
 .PHONY: actionlint
