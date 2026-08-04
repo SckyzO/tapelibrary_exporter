@@ -2167,7 +2167,6 @@ were resolved by contradicting what they originally assumed.
 
 | # | Still open |
 |---|---|
-| 0 | **This journal names real production hosts, and the repo is intended to go public** — sanitize before the first push |
 | 1 | `dataWrittenToCartridge` is assumed to be DECIMAL megabytes |
 | 4 | Every logical library on this fleet reports `encryptionMethod: "none"`. |
 | 5 | Nobody here knows how this fleet cables the drives' second FC port, and it   decides whether a critical `fc_po… |
@@ -2186,9 +2185,9 @@ were resolved by contradicting what they originally assumed.
 | 37 | A cleaning cartridge's `mostRecentUsage` has no threshold attached to it. |
 | 38 | `dataWrittenToCartridge` is documented as "Number of MB", ambiguously. |
 
-18 open, 10 accepted-as-is, 12 resolved.
+17 open, 10 accepted-as-is, 13 resolved.
 
-- `[OPEN]` **This journal names real production hosts, and the repository is
+- `[RESOLVED 2026-08-04]` **This journal names real production hosts, and the repository is
   intended to go public.** Introduced 2026-08-03 by the sessions that measured
   against real hardware: recording *what* was measured meant recording *where*,
   and it was the right call at the time — a latency table nobody can attribute
@@ -2201,7 +2200,7 @@ were resolved by contradicting what they originally assumed.
   | FQDN `library1.example.internal` | 3 | `library1.example.internal` |
   | IP `192.0.2.10` | (same lines) | `192.0.2.10` (RFC 5737 documentation range) |
   | short names `library1`…`p7` | 16 | `library1`…`library5` |
-  | volser `050760JD` | 1 | a `TST…` barcode, matching `testdata/` convention |
+  | volser `TST760JD` | 1 | a `TST…` barcode, matching `testdata/` convention |
 
   **Nothing else leaks**: no credential appears in any commit, `samples/` is
   gitignored save its README, the serials in `testdata/` are the anonymised
@@ -2211,6 +2210,11 @@ were resolved by contradicting what they originally assumed.
   **The branch is deliberately unpushed and has no remote configured**
   (2026-08-04, maintainer's decision), which is what keeps the cheap fix
   available. Do this first when a remote is added.
+  - **Applied 2026-08-04, before the branch was merged and before any remote existed** —
+    which is what kept it a content edit rather than a history rewrite. 27 identifiers
+    replaced, verified to 0 remaining by the same grep that produced the inventory. The
+    substitutions are the ones tabulated above; `samples/` is excluded because it is
+    gitignored and documented as un-anonymised.
 
 - `[OPEN]` **`dataWrittenToCartridge` is assumed to be DECIMAL megabytes** (1 MB = 1e6 bytes),
   taken with the maintainer 2026-08-01 when `data_cartridges_lifetime` shipped.
@@ -2757,7 +2761,7 @@ were resolved by contradicting what they originally assumed.
   per-cartridge series could not otherwise be keyed. That argument is correct
   and it was applied too widely.
   **The live library then produced exactly one duplicated barcode among 9 673
-  distinct ones** — `050760JD`, at internal addresses `021632` and `020608`, 2
+  distinct ones** — `TST760JD`, at internal addresses `021632` and `020608`, 2
   cartridges out of 9 674, 0.02%. That single ambiguity took out all five
   AGGREGATE families as well, permanently, for the whole library. The
   aggregates key on nothing: they are distributions over the parc, and a
