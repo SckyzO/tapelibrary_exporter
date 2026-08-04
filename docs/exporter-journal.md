@@ -2167,6 +2167,7 @@ were resolved by contradicting what they originally assumed.
 
 | # | Still open |
 |---|---|
+| 0 | **This journal names real production hosts, and the repo is intended to go public** — sanitize before the first push |
 | 1 | `dataWrittenToCartridge` is assumed to be DECIMAL megabytes |
 | 4 | Every logical library on this fleet reports `encryptionMethod: "none"`. |
 | 5 | Nobody here knows how this fleet cables the drives' second FC port, and it   decides whether a critical `fc_po… |
@@ -2185,7 +2186,31 @@ were resolved by contradicting what they originally assumed.
 | 37 | A cleaning cartridge's `mostRecentUsage` has no threshold attached to it. |
 | 38 | `dataWrittenToCartridge` is documented as "Number of MB", ambiguously. |
 
-17 open, 10 accepted-as-is, 12 resolved.
+18 open, 10 accepted-as-is, 12 resolved.
+
+- `[OPEN]` **This journal names real production hosts, and the repository is
+  intended to go public.** Introduced 2026-08-03 by the sessions that measured
+  against real hardware: recording *what* was measured meant recording *where*,
+  and it was the right call at the time — a latency table nobody can attribute
+  is not evidence. It has to be undone before the first public push.
+  Confined to this one file, verified rather than assumed
+  (`git grep -E 'hpss\.meteo\.fr|192\.168\.206\.'`):
+
+  | what | occurrences | replace with |
+  |---|---|---|
+  | FQDN `library1.example.internal` | 3 | `library1.example.internal` |
+  | IP `192.0.2.10` | (same lines) | `192.0.2.10` (RFC 5737 documentation range) |
+  | short names `library1`…`p7` | 16 | `library1`…`library5` |
+  | volser `050760JD` | 1 | a `TST…` barcode, matching `testdata/` convention |
+
+  **Nothing else leaks**: no credential appears in any commit, `samples/` is
+  gitignored save its README, the serials in `testdata/` are the anonymised
+  `SN0000000{1,2,3}`, and no commit MESSAGE carries the FQDN or the IP — so
+  this is a content edit, not a history rewrite, as long as it lands before
+  anything is pushed.
+  **The branch is deliberately unpushed and has no remote configured**
+  (2026-08-04, maintainer's decision), which is what keeps the cheap fix
+  available. Do this first when a remote is added.
 
 - `[OPEN]` **`dataWrittenToCartridge` is assumed to be DECIMAL megabytes** (1 MB = 1e6 bytes),
   taken with the maintainer 2026-08-01 when `data_cartridges_lifetime` shipped.
