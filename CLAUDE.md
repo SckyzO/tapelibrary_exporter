@@ -54,6 +54,28 @@ what it requires, and how to run it against a host Go toolchain instead.
 ## Resuming after a cleared context
 
 This repository is designed to be built across several sessions. Everything
-that must survive is on disk, so clearing the context between two collectors
-loses nothing that matters: reread `docs/exporter-journal.md` and
-`docs/metrics.md`, and pick up from the first unticked collector.
+that must survive is on disk, so clearing the context loses nothing that
+matters.
+
+**All eighteen collectors are built** (2026-08-04) and the exporter has been
+validated against the real five-library fleet, so there is no longer a "first
+unticked collector" to resume from. Read `docs/exporter-journal.md` — it is the
+source of truth and it is exhaustive. Its `## Open questions / assumptions`
+section is status-tagged, so:
+
+```sh
+grep '\[OPEN\]' docs/exporter-journal.md
+```
+
+answers "what is left" without reading 2 900 lines. `[ACCEPTED]` marks a
+deliberate cost that will not change; `[RESOLVED <date>]` keeps the reasoning
+rather than deleting it, because several were resolved by contradicting what
+they originally assumed.
+
+**One lesson from the first real deployment is worth carrying into any change
+here.** Three separate bugs — no authentication, every timeout too short, and
+`--version` refusing to run — survived 337 passing tests and a green
+`make check`, because every test points at an `httptest` server that answers
+200 instantly. A suite built that way is silent on authentication, latency and
+concurrency. `make test` proves the code is self-consistent; only
+`docs/validation-checklist.md`, run against a real library, proves it works.
