@@ -2159,7 +2159,35 @@ library, so it exercises perhaps a third of the enumerated states.
 
 ## Open questions / assumptions
 
-- **`dataWrittenToCartridge` is assumed to be DECIMAL megabytes** (1 MB = 1e6 bytes),
+**What is still open, at a glance.** Every entry below carries a status tag, so
+`grep "\[OPEN\]" docs/exporter-journal.md` answers "what is left" without reading 640
+lines. `[ACCEPTED]` marks a known cost that is deliberate and will not change;
+`[RESOLVED <date>]` keeps the reasoning rather than deleting it, because several of these
+were resolved by contradicting what they originally assumed.
+
+| # | Still open |
+|---|---|
+| 1 | `dataWrittenToCartridge` is assumed to be DECIMAL megabytes |
+| 4 | Every logical library on this fleet reports `encryptionMethod: "none"`. |
+| 5 | Nobody here knows how this fleet cables the drives' second FC port, and it   decides whether a critical `fc_po… |
+| 6 | R1.11.2 types `fcPorts.portNumber` as a string; the wire sends a number. |
+| 8 | `library.cartridgeAccess` is emitted by nothing. |
+| 9 | `failedToInitialize` is in the `accessors` critical selector on the manual's word   alone. |
+| 13 | Legacy drive-severity divergence, unresolved. |
+| 15 | R1.11.2 gives `ioStations.failedToClose` and `ioStations.doorOpenTooLong`   the SAME description |
+| 16 | `ioStations.magazine` is null for two different reasons and the library does   not say which. |
+| 20 | The `unknown` VOLSER token is unverified on `/v1/slots`. |
+| 21 | R1.11.2's description of `slots.puts` is a copy-paste error. |
+| 22 | The library-wide robotics counters are sums over a set that can shrink. |
+| 23 | Port 9170 is not registered. |
+| 25 | The `after` query parameter is unverified against real hardware. |
+| 26 | Clock skew between the exporter host and a library empties the events window   silently. |
+| 37 | A cleaning cartridge's `mostRecentUsage` has no threshold attached to it. |
+| 38 | `dataWrittenToCartridge` is documented as "Number of MB", ambiguously. |
+
+17 open, 10 accepted-as-is, 12 resolved.
+
+- `[OPEN]` **`dataWrittenToCartridge` is assumed to be DECIMAL megabytes** (1 MB = 1e6 bytes),
   taken with the maintainer 2026-08-01 when `data_cartridges_lifetime` shipped.
   R1.11.2 says only "Number of MB of data written to the cartridge over the lifetime
   of the cartridge" and never defines the prefix. The decimal reading was chosen for
@@ -2171,7 +2199,7 @@ library, so it exercises perhaps a third of the enumerated states.
   — a few hundred GB is ample — and comparing the delta against what was written. Until
   then, treat the absolute figure as ±5% and prefer the histogram's shape over its
   `_sum` for anything that matters.
-- **A duplicate VOLSER on `/v1/dataCartridges/lifetimeMetrics` fails that collector
+- `[RESOLVED 2026-08-03]` **A duplicate VOLSER on `/v1/dataCartridges/lifetimeMetrics` fails that collector
   closed, and this is unobserved rather than impossible.** R1.11.2 states plainly that
   volsers can repeat and nominates `internalAddress` as the tie-breaker, and the
   `cleaningCartridges` capture proves the case is real on this fleet (70 cartridges,
@@ -2189,7 +2217,7 @@ library, so it exercises perhaps a third of the enumerated states.
   rather than only on cleaning ones, the answer is not to add `internal_address` as a
   label (it churns on every move) but to make the per-volser families skip the
   colliding pair and count it, the same way the `invalid` reason already works.
-- **`FCPortSpeedBelowPeers` cannot be loaded by Prometheus, and the whole rule
+- `[RESOLVED 2026-08-01]` **`FCPortSpeedBelowPeers` cannot be loaded by Prometheus, and the whole rule
   file goes with it.** Found 2026-08-01 by the `logical_libraries` session, the
   first to run `promtool check rules` at all:
   `alerts.yml: 801:15: rule 33 "FCPortSpeedBelowPeers": could not parse
@@ -2211,7 +2239,7 @@ library, so it exercises perhaps a third of the enumerated states.
   `promtool check rules` step — the Docker invocation used here works with no host
   install — would have caught this on the day it shipped. Do that before the next
   collector's rules are written.
-- **Every logical library on this fleet reports `encryptionMethod: "none"`.**
+- `[OPEN]` **Every logical library on this fleet reports `encryptionMethod: "none"`.**
   Both partitions in the 2026-07-28 capture, and therefore presumably all ten
   across the five libraries. This is configuration state rather than a defect,
   and the exporter reports it rather than judging it — but it means nothing
@@ -2223,7 +2251,7 @@ library, so it exercises perhaps a third of the enumerated states.
   that makes it auditable, and a rule watching for it *changing* is the useful
   shape rather than one watching for its value.
 
-- **Nobody here knows how this fleet cables the drives' second FC port, and it
+- `[OPEN]` **Nobody here knows how this fleet cables the drives' second FC port, and it
   decides whether a critical `fc_ports` rule can exist.** Every TS4500 drive
   carries two ports, so a single dark one is redundancy working and rightly a
   warning. Both dark at once would be the critical signal — a drive-side or
@@ -2235,7 +2263,7 @@ library, so it exercises perhaps a third of the enumerated states.
   "Strongly suggests" is not knowing. **Ask whoever cabled the SAN**, then
   either write the rule or record here that it cannot exist. Until then
   `FCPortNoLight` is the only link-state rule and it is a warning.
-- **R1.11.2 types `fcPorts.portNumber` as a string; the wire sends a number.**
+- `[OPEN]` **R1.11.2 types `fcPorts.portNumber` as a string; the wire sends a number.**
   Every one of the capture's 80 entries carries a bare JSON `0` or `1` where the
   manual's attribute table says `(string)`. The field is deliberately not
   declared on `fcPortStats`, so neither shape can break the decode, and nothing
@@ -2244,7 +2272,7 @@ library, so it exercises perhaps a third of the enumerated states.
   this file and the first that is about a *type* rather than an enum value.
   Revisit only if a firmware ever starts sending the documented string AND
   something needs the field on its own — a test pins both shapes parsing today.
-- **`fcPorts.topologyActual` is emitted but nothing alerts on it.** It rides on
+- `[ACCEPTED]` **`fcPorts.topologyActual` is emitted but nothing alerts on it.** It rides on
   `_info`, where a port that negotiated `L-Port` while its peers reached
   `N-Port` is visible to a query but pages nobody. That is deliberate for now:
   every port in the capture is either `N-Port` or `unknown`, so no library here
@@ -2253,7 +2281,7 @@ library, so it exercises perhaps a third of the enumerated states.
   decision on `drives` declined to invent. Watch the first weeks of the label
   and add a rule if the mixed state turns out to be real.
 
-- **`library.cartridgeAccess` is emitted by nothing.** `GET /v1/library` returns it
+- `[OPEN]` **`library.cartridgeAccess` is emitted by nothing.** `GET /v1/library` returns it
   (`normal` in the capture) and it is plainly the `access` ternary the shared
   vocabulary already reserves a label for, but the `## Cardinality budget` line for
   `library` does not include it, so the collector was built to the budget and left it
@@ -2267,7 +2295,7 @@ library, so it exercises perhaps a third of the enumerated states.
   it. `library` is now the only collector that receives an `access` field from the
   API and emits nothing for it. Three series and no new label key; the question is
   no longer really open, it just needs someone to close it.
-- **`failedToInitialize` is in the `accessors` critical selector on the manual's word
+- `[OPEN]` **`failedToInitialize` is in the `accessors` critical selector on the manual's word
   alone.** Every other severity classification in `alerts.yml` was ported from
   `samples/legacy/`, which cannot classify this value because it does not know it
   exists. R1.11.2 tabulates it nowhere either; it names it only in prose, describing
@@ -2275,19 +2303,19 @@ library, so it exercises perhaps a third of the enumerated states.
   and bothGrippersFailed" — the other two of which are already the critical rule. That
   grouping is IBM's, not an invention here, but it is one sentence of prose carrying an
   alert that pages. **Confirm, or move it to warning.**
-- **`accessors.temperature` and `accessors.humidity` are descriptors that emit nothing
+- `[ACCEPTED]` **`accessors.temperature` and `accessors.humidity` are descriptors that emit nothing
   on this fleet.** The manual is explicit ("For TS4500, null is returned as there is no
   sensor") and both accessors in the capture agree. They ship anyway, so hardware
   carrying the sensor reports it without a code change, and null produces no series
   rather than a `0` that a dashboard would average as a freezing, bone-dry library.
   The cost is two descriptors, two `docs/metrics.md` rows and a test that pins the
   behaviour. Revisit if the fleet is never going to see such hardware.
-- **`accessors.stateReferenceEvent` is read by nothing.** `GET /v1/accessors` returns
+- `[ACCEPTED]` **`accessors.stateReferenceEvent` is read by nothing.** `GET /v1/accessors` returns
   the ID of the event that caused the current state, `null` when no error or warning
   did. It is neither a measurement nor a bounded label value, and it points into the
   `events` endpoint, which gets its own collector. Revisit only if joining an accessor
   state to its causing event turns out to be a query operators actually run.
-- **Five `library` statuses carry no severity.** The `LibraryDegraded` rules classify
+- `[ACCEPTED]` **Five `library` statuses carry no severity.** The `LibraryDegraded` rules classify
   11 of the 17 documented statuses, carried over from the legacy scripts. `unknown`,
   `notConfigured`, `initializing`, `calibrationRequired` and `cartridgeDegraded` are
   in neither rule because the legacy scripts never mapped them — unclassified, not
@@ -2295,13 +2323,13 @@ library, so it exercises perhaps a third of the enumerated states.
   scripts treat it as a library status and R1.11.2 does not list it as one, so
   matching on it would be a rule that can never fire (see the four-way contradiction
   below).
-- **Legacy drive-severity divergence, unresolved.** `samples/legacy/check_library.sh`
+- `[OPEN]` **Legacy drive-severity divergence, unresolved.** `samples/legacy/check_library.sh`
   classifies `inServiceMode` as critical (`2`) and `cleaning` as warning (`1`);
   `check_library_30min.sh` classifies the same two as warning (`1`) and normal (`0`).
   The alert candidates above take the 30-minute script's reading (the more recently
   edited of the two), because a drive in a scheduled cleaning cycle is doing exactly
   what it should. **Confirm before the `drives` alert rule ships.**
-- **Four legacy states contradict the R1.11.2 manual**, and each needs a decision
+- `[RESOLVED 2026-08-01]` **Four legacy states contradict the R1.11.2 manual**, and each needs a decision
   before the corresponding alert rule is ported. The manual is treated as
   authoritative in `## Architecture decisions` above, but the scripts were written
   against a live library and may reflect an older firmware — or a bug that has been
@@ -2361,7 +2389,7 @@ library, so it exercises perhaps a third of the enumerated states.
     shows `unknown` correlating with a real fault.
   - `library`: the scripts classify `restarting` as critical, but `restarting` is not
     in the manual's library-status table (it is a *drive* and *node card* state).
-- **R1.11.2 gives `ioStations.failedToClose` and `ioStations.doorOpenTooLong`
+- `[OPEN]` **R1.11.2 gives `ioStations.failedToClose` and `ioStations.doorOpenTooLong`
   the SAME description**, verbatim: "The I/O station door failed to close.
   Verify that the magazine is fully inserted." That is plainly a copy-paste
   error in IBM's own table — the two state *names* mean different things, and a
@@ -2372,7 +2400,7 @@ library, so it exercises perhaps a third of the enumerated states.
   overlap with `IOStationDoorOpen` is the mitigation: that rule reads the door
   gauge directly and does not depend on the library's own classification.
   **Resolve by observing a real station left open**, not from the manual.
-- **`ioStations.magazine` is null for two different reasons and the library does
+- `[OPEN]` **`ioStations.magazine` is null for two different reasons and the library does
   not say which.** R1.11.2: null is returned "if the I/O station door is open or
   no magazine is inserted". `tapelibrary_io_station_magazine_present` therefore
   reports the union, and its help text says so rather than claiming the narrower
@@ -2380,14 +2408,14 @@ library, so it exercises perhaps a third of the enumerated states.
   the two in a query (door open + no magazine = someone is loading; door closed
   + no magazine = the station is genuinely empty), which is why both series
   exist. Revisit only if a firmware release starts distinguishing them.
-- **The documented state tables are a floor, not a ceiling.** The manual references
+- `[ACCEPTED]` **The documented state tables are a floor, not a ceiling.** The manual references
   `failedToInitialize` (accessor), `cartridgeFailedMove` and `errorThresholdExceeded`
   (cartridge) in prose while omitting all three from the corresponding tables, and
   lists `lifetimeRemaining` — plainly a numeric attribute — inside the data-cartridge
   *state* table. Hence the emit-observed-values-too rule above. Any state a collector
   meets that is not in its list should also raise a one-line note in
   `docs/exporter-journal.md` so the vocabulary converges on reality over time.
-- **Volume figures are inferred, not measured.** The captures are truncated samples
+- `[RESOLVED 2026-08-03]` **Volume figures are inferred, not measured.** The captures are truncated samples
   (60 `dataCartridges` against `totalCartridges: 9749`; 79 `slots` against
   `totalCapacity: 10732`). Worst-case series counts above come from the library's own
   counters. `/add-collector` should record the *observed* count next to each budget
@@ -2402,7 +2430,7 @@ library, so it exercises perhaps a third of the enumerated states.
   array — before anyone enables `--collector.slots.per-slot` fleet-wide. The lesson
   for `data_cartridges_lifetime` and `events`, both still unbuilt: check what unit the
   library's own counter counts before deriving a series budget from it.
-- **`/v1/slots` reports `getRetries` but no `gets`.** `puts`, `putRetries` and
+- `[ACCEPTED]` **`/v1/slots` reports `getRetries` but no `gets`.** `puts`, `putRetries` and
   `getRetries` are all there; the success count on the get side is not, so
   `SlotGetRetryRateHigh` is an absolute rate where its put-side sibling is a ratio, and
   its threshold is re-derived rather than bounded by an observation. The two candidate
@@ -2412,7 +2440,7 @@ library, so it exercises perhaps a third of the enumerated states.
   true at steady state and false during exactly the migrations that raise the rate.
   **Resolve by watching the absolute rate for a few weeks** and setting the threshold
   from what this fleet's quiet hours actually look like.
-- **The `unknown` VOLSER token is unverified on `/v1/slots`.** R1.11.2 documents it on
+- `[OPEN]` **The `unknown` VOLSER token is unverified on `/v1/slots`.** R1.11.2 documents it on
   `/v1/ioStations`' `contentsVolser` ("a cartridge present but unidentifiable") and says
   only "Any empty tier is listed as null" for this endpoint's `contents`. The collector
   handles the token anyway, on `io_stations`' terms, and
@@ -2421,7 +2449,7 @@ library, so it exercises perhaps a third of the enumerated states.
   it is bad — an unreadable cartridge would be counted as an empty tier and advertised
   as free capacity the robot cannot use. **Confirm by finding a slot holding a cartridge
   with a damaged label**, which no capture on hand contains.
-- **R1.11.2's description of `slots.puts` is a copy-paste error.** It reads "The number
+- `[OPEN]` **R1.11.2's description of `slots.puts` is a copy-paste error.** It reads "The number
   of times a cartridge is placed into the I/O station", which belongs to the I/O station
   endpoint: the sibling `putRetries` on the same table says "into this slot over the
   lifetime of this slot", and the value is reported per slot with a per-slot location.
@@ -2429,7 +2457,7 @@ library, so it exercises perhaps a third of the enumerated states.
   found in section 6 (the first being the two I/O station states sharing one
   description), which is worth remembering as a general property of the manual rather
   than as two isolated typos: **the prose is less reliable than the field placement.**
-- **The library-wide robotics counters are sums over a set that can shrink.**
+- `[OPEN]` **The library-wide robotics counters are sums over a set that can shrink.**
   `tapelibrary_slots_{puts,put_retries,get_retries}_total` are summed across every slot
   so the default build costs 3 series rather than 3 per slot. Removing a frame drops its
   slots out of the sum, and Prometheus reads the fall as a counter reset. Accepted
@@ -2437,10 +2465,10 @@ library, so it exercises perhaps a third of the enumerated states.
   operation, and the alternative is ~13 000 series per library in every deployment. The
   same caveat applies to any future collector that sums a device counter across a
   variable population; state it in the help text rather than discovering it in a graph.
-- **Port 9170 is not registered.** It is free within this fleet (which already uses
+- `[OPEN]` **Port 9170 is not registered.** It is free within this fleet (which already uses
   9313, 9315, 9341, 9466, 9610, 9800) but has not been claimed on the Prometheus
   default-port allocation wiki. Claim it before the first public release.
-- **`events.errorCode` is excluded from the default budget.** The field is a
+- `[ACCEPTED]` **`events.errorCode` is excluded from the default budget.** The field is a
   hexadecimal library error code whose value set is large and not enumerated in the
   manual, so it is a cardinality risk that cannot be budgeted from what is on hand.
   The `events` collector needs an explicit decision at `/add-collector` time:
@@ -2454,7 +2482,7 @@ library, so it exercises perhaps a third of the enumerated states.
   **no error-severity event has ever been observed on this fleet**, so there is
   nothing to put in the allow-list today and no default worth shipping. Populate it
   the first time a real error code appears, and add a rule alongside it.
-- **The `after` query parameter is unverified against real hardware.** The `events`
+- `[OPEN]` **The `after` query parameter is unverified against real hardware.** The `events`
   collector builds it with `url.Values.Encode()`, which percent-encodes the `+` of a
   positive timezone offset as `%2B` (a literal `+` in a query value decodes to a
   SPACE) and the colons as `%3A`. R1.11.2's own examples show these characters
@@ -2464,7 +2492,7 @@ library, so it exercises perhaps a third of the enumerated states.
   query string, so the encoding should be correct, but no capture on hand was taken
   with a query parameter at all. **Confirm by running one query against a real
   library**, before trusting a quiet window.
-- **Clock skew between the exporter host and a library empties the events window
+- `[OPEN]` **Clock skew between the exporter host and a library empties the events window
   silently.** `after` is computed from this host's clock as `now − lookback` and sent
   as an absolute instant. A library whose clock trails this host by more than the
   lookback returns an empty array, the refresh succeeds, the freshness gauge stays
@@ -2473,7 +2501,7 @@ library, so it exercises perhaps a third of the enumerated states.
   slack chosen for exactly this, not for the window itself. **Check the libraries'
   clocks against the monitoring host**, and treat a library that has reported no
   event of any severity for days as a skew suspect rather than a quiet one.
-- **The exporter pollutes the event log it reads.** All 42 events in the 2026-07-28
+- `[ACCEPTED]` **The exporter pollutes the event log it reads.** All 42 events in the 2026-07-28
   capture are logins and logouts, including `0834`/`0838` pairs attributed to REST,
   and this exporter authenticates on every request with no session handshake. If the
   library records an event per authenticated REST call, then eighteen collectors
@@ -2483,13 +2511,13 @@ library, so it exercises perhaps a third of the enumerated states.
   unaffected, so nothing is broken — but **confirm what the library actually logs per
   REST request** before anyone reads meaning into the information count, and revisit
   if it turns out the exporter is measurably inflating the library's own event log.
-- **Session lifetime is undocumented.** The manual states that a session persists
+- `[RESOLVED 2026-08-04]` **Session lifetime is undocumented.** The manual states that a session persists
   "until they logout or the session times out due to inactivity based on the library's
   settings" without naming a default, and does not state a per-user concurrent-session
   limit. The poller must therefore treat a `401` as a re-login trigger rather than
   assume a session outlives a chosen interval, and five pollers sharing one monitoring
   account may or may not contend. Verify against a real library early.
-- **TLS trust is undecided.** SSL was enabled on these libraries only recently, and
+- `[RESOLVED 2026-08-03]` **TLS trust is undecided.** SSL was enabled on these libraries only recently, and
   whether they present a self-signed certificate or one issued by an internal CA is
   unverified. `config.example.yml` should demonstrate `ca_file` rather than
   `insecure_skip_verify`; confirm which the fleet actually needs.
@@ -2529,7 +2557,7 @@ library, so it exercises perhaps a third of the enumerated states.
     `insecure_skip_verify`. Worth raising with whoever owns the libraries, since it
     is a five-minute change per machine that turns an accepted risk back into a
     verified connection.
-- **Report windows carry their own timestamp, which will not be honoured.**
+- `[RESOLVED 2026-08-02]` **Report windows carry their own timestamp, which will not be honoured.**
   `/v1/reports/*` returns several one-hour windows, each with its own `time`. The
   design exposes only the newest complete window, as a Gauge, at scrape time — no
   `honor_timestamps`. A window that stops advancing will therefore look fresh; a
@@ -2597,7 +2625,7 @@ library, so it exercises perhaps a third of the enumerated states.
     four windows in the capture report `3600`, which is evidence that the
     library publishes only closed windows, not proof. Revisit if a window ever
     reports anything else.
-- **Per-endpoint poll cadences are not calibrated in this brief.** An earlier session
+- `[RESOLVED 2026-08-03]` **Per-endpoint poll cadences are not calibrated in this brief.** An earlier session
   ran a timing probe per endpoint per library, but those measurements were not
   preserved on disk and are not restated here from memory. The design assumes
   per-endpoint intervals (a fast tier for hardware health, a slow tier for the heavy
@@ -2672,7 +2700,7 @@ library, so it exercises perhaps a third of the enumerated states.
   introduced a `containsString` helper that collided with one already declared in
   `docs_check_test.go` — invisible to `go build`, which excludes test files, and
   caught only by `go test`.
-- **A duplicated volser used to kill this collector's aggregates too, and no
+- `[RESOLVED 2026-08-03]` **A duplicated volser used to kill this collector's aggregates too, and no
   longer does** (found and fixed 2026-08-03, the first time
   `data_cartridges_lifetime` ever completed against real hardware).
   `/v1/dataCartridges/lifetimeMetrics` reports **no `location`**, which is what
@@ -2706,7 +2734,7 @@ library, so it exercises perhaps a third of the enumerated states.
   a key is actually used.** A response that cannot be keyed for one family is
   not necessarily unusable for the others, and refusing it wholesale trades
   everything for the part that is ambiguous.
-- **The five libraries have been reached, all at once, and the multi-instance
+- `[RESOLVED 2026-08-03]` **The five libraries have been reached, all at once, and the multi-instance
   model works** (2026-08-03). One process, five instances, one shared account,
   the SOCKS tunnel in front of all of them: **90 of 90 collectors populated,
   zero errors**. This is the first time anything beyond `library1` was
@@ -2723,7 +2751,7 @@ library, so it exercises perhaps a third of the enumerated states.
   other four report zero. So it is a site-specific data-quality fault on one
   machine rather than a property of the endpoint, which is exactly what
   `DataCartridgeDuplicateVolser` was shaped to say.
-- **The concurrency ceiling decided in `## Architecture decisions` is not the
+- `[RESOLVED 2026-08-03]` **The concurrency ceiling decided in `## Architecture decisions` is not the
   shipped default** (found 2026-08-03). That section fixes it at 1, and
   `--exporter.max-requests-per-target` defaults to **0, meaning unlimited**. The
   consequence is not theoretical: run against `library1`, all eighteen collectors
@@ -2755,7 +2783,7 @@ library, so it exercises perhaps a third of the enumerated states.
     and task flow" notes require each REST response to be retrieved before the
     next command is sent.
     **Result against the real fleet: 17 of 19 collectors populated, from 0.**
-- **`success=1` is emitted while nothing works** (found 2026-08-03, and the most
+- `[RESOLVED 2026-08-03]` **`success=1` is emitted while nothing works** (found 2026-08-03, and the most
   serious observability gap in this exporter). `StatusTracker` counts the metrics a
   collector emits per scrape, and a background collector ALWAYS emits its
   `..._last_refresh_timestamp_seconds` gauge — by design, so that the startup
@@ -2775,7 +2803,7 @@ library, so it exercises perhaps a third of the enumerated states.
   built that way is silent on timeouts, on ceilings, and on auth — the three things
   that were actually broken. The fake library added in `session_test.go` closes the
   auth third; the other two remain untested by construction.
-- **`cleaning_cartridges` is asymmetric on purpose.** It is the only collector
+- `[ACCEPTED]` **`cleaning_cartridges` is asymmetric on purpose.** It is the only collector
   emitting `volser` by default. The asymmetry is justified by population size, not by
   the resource's nature; if a site runs cleaning cartridges in the thousands, the same
   opt-in flag pattern applies and the default should flip.
@@ -2785,17 +2813,17 @@ library, so it exercises perhaps a third of the enumerated states.
   aggregates emitted either way. What remains open is only the trigger for flipping
   it: nobody has measured how a site running cleaning cartridges in the thousands
   actually behaves, so the default stands on this fleet's 70.
-- **A cleaning cartridge's `mostRecentUsage` has no threshold attached to it.**
+- `[OPEN]` **A cleaning cartridge's `mostRecentUsage` has no threshold attached to it.**
   The per-cartridge `last_usage_timestamp_seconds` gauge shipped 2026-08-01, but no
   rule reads it and none should be invented: nobody here has measured how long a
   healthy cleaning cartridge legitimately sits between mounts on a library that
   holds 70 of them and cleans a drive rarely. It is there to be looked at when the
   supply alerts fire, and to answer "is the robot always reaching for the same
   handful of cartridges" once a few months of history exist. Revisit once it does.
-- **`dataWrittenToCartridge` is documented as "Number of MB", ambiguously.** The
+- `[OPEN]` **`dataWrittenToCartridge` is documented as "Number of MB", ambiguously.** The
   design converts to `_bytes_total` (base units) assuming decimal MB (×10⁶). If IBM
   means MiB (×2²⁰), every byte figure is 4.9% low. Verify against a cartridge whose
   written volume is known from the host side before the collector ships.
-- **Adding an instance label key later requires a restart.** `model` is included from
+- `[ACCEPTED]` **Adding an instance label key later requires a restart.** `model` is included from
   the start for exactly this reason. Any further per-instance dimension (site, floor,
   owner) is cheap to add now and expensive to add after the first deployment.
