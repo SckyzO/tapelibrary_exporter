@@ -25,7 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ### Security     - vulnerability fixes
 -->
 
-## [Unreleased]
+## [0.1.0] - 2026-08-05
+
+First tagged release. Everything below describes the exporter as it stands at this
+tag, validated against a five-library TS4500 fleet.
 
 ### Added
 
