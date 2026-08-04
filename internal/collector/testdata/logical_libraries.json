@@ -1,0 +1,20 @@
+[
+  {
+    "name": "Library-5",
+    "mediaType": "3592",
+    "drives": 20,
+    "virtualSlots": 5000,
+    "virtualIOSlots": 255,
+    "cartridges": 4819,
+    "encryptionMethod": "none"
+  },
+  {
+    "name": "Library-6",
+    "mediaType": "3592",
+    "drives": 20,
+    "virtualSlots": 5000,
+    "virtualIOSlots": 255,
+    "cartridges": 4853,
+    "encryptionMethod": "none"
+  }
+]

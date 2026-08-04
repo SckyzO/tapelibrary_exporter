@@ -1,0 +1,102 @@
+[
+  {
+    "ID": 19416,
+    "severity": "information",
+    "time": "2026-07-28T06:00:05+0000",
+    "location": null,
+    "user": "operator1",
+    "description": "A user logged in with CLI from 192.0.2.9",
+    "state": null,
+    "errorCode": "0832"
+  },
+  {
+    "ID": 19418,
+    "severity": "information",
+    "time": "2026-07-28T06:00:56+0000",
+    "location": null,
+    "user": "operator1",
+    "description": "A user logged out with CLI from 192.0.2.9",
+    "state": null,
+    "errorCode": "0837"
+  },
+  {
+    "ID": 19419,
+    "severity": "information",
+    "time": "2026-07-28T06:14:55+0000",
+    "location": null,
+    "user": "operator1",
+    "description": "A user logged in with CLI from 192.0.2.9",
+    "state": null,
+    "errorCode": "0832"
+  },
+  {
+    "ID": 19420,
+    "severity": "information",
+    "time": "2026-07-28T06:15:59+0000",
+    "location": null,
+    "user": "operator1",
+    "description": "A user logged out with CLI from 192.0.2.9",
+    "state": null,
+    "errorCode": "0837"
+  },
+  {
+    "ID": 19443,
+    "severity": "information",
+    "time": "2026-07-28T08:56:46+0000",
+    "location": null,
+    "user": "operator3",
+    "description": "A user logged in to the GUI from 192.0.2.10",
+    "state": "Call home initiated",
+    "errorCode": "0800"
+  },
+  {
+    "ID": 19444,
+    "severity": "information",
+    "time": "2026-07-28T08:59:52+0000",
+    "location": null,
+    "user": "operator2",
+    "description": "A user logged in with REST from 192.0.2.10",
+    "state": "Call home initiated",
+    "errorCode": "0834"
+  },
+  {
+    "ID": 19446,
+    "severity": "information",
+    "time": "2026-07-28T09:01:08+0000",
+    "location": null,
+    "user": "operator2",
+    "description": "A user logged in with REST from 192.0.2.10",
+    "state": "Call home initiated",
+    "errorCode": "0834"
+  },
+  {
+    "ID": 19448,
+    "severity": "information",
+    "time": "2026-07-28T09:10:23+0000",
+    "location": null,
+    "user": "operator2",
+    "description": "A user logged out with REST from 192.0.2.10",
+    "state": null,
+    "errorCode": "0838"
+  },
+  {
+    "ID": 19450,
+    "severity": "information",
+    "time": "2026-07-28T09:14:56+0000",
+    "location": null,
+    "user": "operator1",
+    "description": "A user logged in with CLI from 192.0.2.9",
+    "state": null,
+    "errorCode": "0832"
+  },
+  {
+    "ID": 19452,
+    "severity": "information",
+    "time": "2026-07-28T09:15:51+0000",
+    "location": null,
+    "user": "operator1",
+    "description": "A user logged out with CLI from 192.0.2.9",
+    "state": null,
+    "errorCode": "0837"
+  }
+]

@@ -1,0 +1,87 @@
+# Prometheus scrape configuration for tapelibrary_exporter.
+#
+# Drop the `scrape_configs` entry below into your own prometheus.yml, and load
+# the two rule files beside this one. Both are validated by `make rules-check`.
+#
+#   rule_files:
+#     - /etc/prometheus/rules/tapelibrary/alerts.yml
+#     - /etc/prometheus/rules/tapelibrary/rules.yml
+#
+# ---------------------------------------------------------------------------
+# ONE target, not five, and that is the whole point of this build.
+# ---------------------------------------------------------------------------
+#
+# This is a multi-instance exporter: a single process watches every library
+# listed in its own --config.file and serves all of them through one /metrics.
+# So Prometheus scrapes the EXPORTER, once, and each series carries a `library`
+# label naming the machine it came from.
+#
+# The consequence to internalise before writing any query or rule: `instance`
+# is the exporter's host, NOT a library. Five libraries behind one exporter all
+# share one `instance` value. Group and alert by `library`; use `instance` only
+# to distinguish two exporters from each other.
+#
+# Nothing here needs relabeling to achieve that. The `library` label is applied
+# by the exporter itself, per instance, at registration time — which is also
+# why it appears on the per-collector health metrics and not only on the
+# business ones.
+#
+# ---------------------------------------------------------------------------
+# Why scrape_interval is 1m and not 15s
+# ---------------------------------------------------------------------------
+#
+# Every collector here is a background poller: it refreshes its own cache on
+# its own schedule (5m for hardware state, 15m for the report windows, 1h for
+# the two heavy cartridge endpoints) and a scrape only replays that cache. A
+# scrape NEVER contacts a library, which is why it stays fast even while a
+# refresh is in flight — but it also means scraping faster than the fastest
+# refresh interval just resamples identical values.
+#
+# 1m keeps alert evaluation responsive and `for:` durations honest while
+# costing nothing. Going below that buys resolution the data does not have.
+#
+# Sizing, measured on a five-library fleet: ~18 000 series per scrape, ~3 600
+# per library, scaling with drive count rather than cartridge count. See
+# docs/exporter-journal.md's cardinality budget before enabling any of the
+# three per-item flags, which are off by default for this reason.
+
+scrape_configs:
+  - job_name: tapelibrary
+    scrape_interval: 1m
+
+    # Generous relative to the scrape itself, which serves caches and returns
+    # in milliseconds. It covers the exporter being briefly busy rather than a
+    # library being slow: a slow library delays a background refresh and shows
+    # up as a stale freshness gauge, never as a slow scrape.
+    scrape_timeout: 30s
+
+    static_configs:
+      - targets:
+          # The exporter's own address, once. NOT the libraries: those are
+          # listed in the exporter's --config.file.
+          - tapelibrary-exporter.example.internal:9170
+
+    # Uncomment if you set --web.config.file on the exporter to enable TLS
+    # and/or basic auth on /metrics itself. Unrelated to the credentials the
+    # exporter uses to reach the libraries, which live in its --config.file.
+    #
+    # scheme: https
+    # tls_config:
+    #   ca_file: /etc/prometheus/tapelibrary-exporter-ca.crt
+    # basic_auth:
+    #   username: prometheus
+    #   password_file: /etc/prometheus/tapelibrary-exporter-password
+
+    # ---------------------------------------------------------------------
+    # Optional: drop the exporter's own Go runtime metrics.
+    # ---------------------------------------------------------------------
+    # Prefer --web.disable-exporter-metrics on the exporter, which stops them
+    # being generated at all. Do it here only when you cannot change the
+    # exporter's flags, and keep tapelibrary_exporter_* — those are the
+    # per-collector health metrics the health dashboard and the
+    # CollectorNeverRefreshed / CollectorRefreshStale rules read.
+    #
+    # metric_relabel_configs:
+    #   - source_labels: [__name__]
+    #     regex: '(go|process)_.*'
+    #     action: drop

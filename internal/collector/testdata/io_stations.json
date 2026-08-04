@@ -1,0 +1,60 @@
+[
+  {
+    "location": "ioStation_F2IOu",
+    "state": "normal",
+    "door": {
+      "opened": "no"
+    },
+    "magazine": {
+      "mediaType": "3592",
+      "ioSlots": 16,
+      "contentsVolser": [
+        "TST001JA",
+        "TST002JA",
+        "TST003JA",
+        "TST004JA",
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ]
+    }
+  },
+  {
+    "location": "ioStation_F2IOl",
+    "state": "normal",
+    "door": {
+      "opened": "no"
+    },
+    "magazine": {
+      "mediaType": "3592",
+      "ioSlots": 16,
+      "contentsVolser": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ]
+    }
+  }
+]

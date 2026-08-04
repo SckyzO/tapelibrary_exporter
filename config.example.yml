@@ -90,15 +90,75 @@ flags:
 # meant to be copied and tried should do. Uncomment it and point the paths
 # at your own files to use it.
 #
+# basic_auth CARRIES the credentials, but NO Authorization header is ever
+# sent. That is worth the surprise it causes, and it is not a bug.
+#
+# The TS4500 accepts no HTTP authentication scheme at all (verified against a
+# real library 2026-08-03: a GET carrying an Authorization header is answered
+# 401, with no WWW-Authenticate challenge). What it wants instead is those
+# same two strings POSTed to /v1/login, which returns a JSESSIONID cookie that
+# every subsequent request carries. This exporter performs that handshake for
+# you: it reads username/password (or password_file) out of the block below,
+# strips the block before building the transport so nothing goes on the wire
+# for no purpose, logs in on the first request, renews the session whenever
+# the library expires it, and logs out at shutdown.
+#
+# Practical consequences:
+#   - Omit basic_auth entirely and the exporter sends no credentials and
+#     performs no login, which every request will then be refused.
+#   - password_file is preferred over an inline password, and must contain
+#     ONLY the password: a trailing newline is trimmed, anything else is not.
+#   - Logging out at shutdown is not cosmetic. The library's session table is
+#     finite, so an exporter killed with SIGKILL repeatedly will eventually be
+#     refused a new session until the old ones expire on their own.
+#
+# A TS4500 running its FACTORY certificate needs insecure_skip_verify, and
+# that is forced by the hardware rather than chosen for convenience. Verified
+# against a real library 2026-08-03: the certificate is self-signed
+# (subject == issuer, CN=ibm.com, O=International Business Machines Corp.M)
+# and carries NO subjectAltName at all — no DNS name, no IP. Go has ignored
+# the Common Name since 1.15 and removed the fallback entirely in 1.17, so
+# every way of writing a verifying config fails:
+#
+#   server_name: <the library's own hostname>
+#     -> x509: certificate is not valid for any names
+#   server_name: ibm.com
+#     -> x509: certificate relies on legacy Common Name field, use SANs instead
+#   no server_name (falls back to the address)
+#     -> x509: certificate is not valid for any names
+#
+# ca_file does NOT help. Pinning that certificate as the trust root fixes
+# chain validation, which was never the problem; it is NAME validation that
+# fails, and no CA can supply a SAN the certificate does not contain.
+#
+# The risk this accepts, stated rather than hidden: with
+# insecure_skip_verify the connection is encrypted but unauthenticated, so
+# anything able to intercept the path to the library can present its own
+# certificate and read the monitoring account's credentials. Keep the traffic
+# on a network you trust end to end, and prefer basic_auth's password_file
+# over an inline password so the secret is not in this file.
+#
+# The clean fix is on the library, not here: replace the factory certificate
+# with one carrying a proper subjectAltName (TS4500 GUI, Settings -> Security
+# -> Certificates), then switch to the verifying block commented below it.
+#
+# http_client_config:
+#   basic_auth:
+#     username: monitoring
+#     password_file: /etc/tapelibrary_exporter/basic_auth_password
+#   tls_config:
+#     insecure_skip_verify: true
+#
+# Once the library presents a certificate with a subjectAltName, this is the
+# block to switch to instead:
+#
 # http_client_config:
 #   basic_auth:
 #     username: monitoring
 #     password_file: /etc/tapelibrary_exporter/basic_auth_password
 #   tls_config:
 #     ca_file: /etc/tapelibrary_exporter/ca.crt
-#     cert_file: /etc/tapelibrary_exporter/client.crt
-#     key_file: /etc/tapelibrary_exporter/client.key
-#     server_name: example.internal
+#     server_name: library1.example.internal
 #     insecure_skip_verify: false
 
 # modules: named credential/TLS bundles this exporter can select. What reads

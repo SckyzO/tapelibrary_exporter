@@ -16,19 +16,28 @@ Group=tapelibrary_exporter
 # `make build` is bin/tapelibrary_exporter inside the project checkout, but most
 # operators copy it to /usr/local/bin/ (or extract it there from one of the
 # tagged-release archives - see docs/release-process.md) for a real install.
-ExecStart=/usr/local/bin/tapelibrary_exporter --web.listen-address=":9170"
+#
+# --config.file is MANDATORY on this build and has no flag equivalent: it is
+# what lists the libraries to watch, so the exporter refuses to start without
+# it (exit 1, "the multi-instance target model requires --config.file"). Start
+# from config.example.yml in the repository.
+ExecStart=/usr/local/bin/tapelibrary_exporter \
+  --web.listen-address=":9170" \
+  --config.file="/etc/tapelibrary_exporter/config.yml"
 
 # --- Example with TLS and/or basic auth ---
 # See the exporter-toolkit web-config docs for the file format:
 # https://github.com/prometheus/exporter-toolkit/blob/master/docs/web-configuration.md
 # ExecStart=/usr/local/bin/tapelibrary_exporter \
 #   --web.listen-address=":9170" \
+#   --config.file="/etc/tapelibrary_exporter/config.yml" \
 #   --web.config.file="/etc/tapelibrary_exporter/web-config.yml"
 
 # --- Example with only specific collectors enabled ---
 # See docs/configuration.md for the full --collector.* flag list.
 # ExecStart=/usr/local/bin/tapelibrary_exporter \
 #   --web.listen-address=":9170" \
+#   --config.file="/etc/tapelibrary_exporter/config.yml" \
 #   --no-collector.<name>
 
 Restart=on-failure
@@ -59,6 +68,32 @@ ExecReload=/bin/kill -HUP $MAINPID
 # the binary gets the same guarantee whether it runs as a container or a
 # systemd unit.
 NoNewPrivileges=true
+
+# The configuration carries the libraries' monitoring credentials (basic_auth's
+# password_file, per config.example.yml), so it is read-only to the service and
+# should be 0640 root:tapelibrary_exporter on disk. ConfigurationDirectory
+# creates /etc/tapelibrary_exporter with that ownership on first start.
+ConfigurationDirectory=tapelibrary_exporter
+ConfigurationDirectoryMode=0750
+
+# This exporter reads a REST API over the network and writes nothing but its
+# own logs: it needs no write access to the filesystem at all.
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+# Outbound HTTPS to the libraries, plus the listen socket. Add AF_UNIX only if
+# you point --web.config.file at something that needs it.
+RestrictAddressFamilies=AF_INET AF_INET6
 
 # The directives below are stricter and can need one-off tuning (e.g. if you
 # point --web.config.file, or a CLI-flavor collector's target binary, at a

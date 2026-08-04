@@ -147,7 +147,7 @@ only requirement on the developer machine), and the result is identical on every
 After every commit, run:
 
 ```bash
-make check    # vet + lint + test + vuln + actionlint + zizmor + deadcode + docs-check, containerized
+make check    # vet + lint + test + vuln + actionlint + zizmor + deadcode + docs-check + rules-check, containerized
 ```
 
 **Before tagging, both of these must be green (release blockers):**

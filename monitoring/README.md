@@ -18,6 +18,16 @@ are a Grafana concern** (this repo ships one, health, plus the pattern to
 build your own). See [Observability](../README.md#observability) for where
 this fits among the rest of the exporter's docs.
 
+## Scraping this exporter
+
+`prometheus/scrape-config.example.yml` is the `scrape_configs` entry to copy into
+your own `prometheus.yml`, with the two rule files beside it.
+
+**One target, not one per library.** A single exporter process watches every
+library in its `--config.file` and serves them all through one `/metrics`, so
+`instance` is the exporter's host and `library` is the machine. Group and alert
+by `library`.
+
 ## Two tiers, one pattern
 
 Everything in `alerts.yml` follows the same shape:
@@ -31,7 +41,7 @@ Everything in `alerts.yml` follows the same shape:
   specific to your target, so there is no version of a business alert
   that's true out of the box for every exporter. The commented block at the
   bottom of `alerts.yml` teaches the same warning/critical + `for:` +
-  portable-labels pattern against the bundled `ExampleCollector`'s metric.
+  portable-labels pattern against a placeholder metric name.
   Uncomment and adapt it, or add a new one, as you build real collectors.
   `/add-collector` (if you have the scaffolding plugin available) proposes
   a real alert here for every collector's own metrics as you add them.

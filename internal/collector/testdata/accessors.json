@@ -1,0 +1,38 @@
+[
+  {
+    "location": "accessor_Aa",
+    "state": "onlineActive",
+    "driveAccess": "normal",
+    "cartridgeAccess": "normal",
+    "pivots": 6079578,
+    "barCodeScans": 258892,
+    "velocityScalingXY": 100,
+    "velocityScalingPivot": 100,
+    "travelX": 329026,
+    "travelY": 50453,
+    "getsGripper1": 2727298,
+    "putsGripper1": 2727272,
+    "getsGripper2": 2727304,
+    "putsGripper2": 2727265,
+    "temperature": null,
+    "humidity": null
+  },
+  {
+    "location": "accessor_Ab",
+    "state": "onlineActive",
+    "driveAccess": "normal",
+    "cartridgeAccess": "normal",
+    "pivots": 5516728,
+    "barCodeScans": 151821,
+    "velocityScalingXY": 100,
+    "velocityScalingPivot": 100,
+    "travelX": 328348,
+    "travelY": 291176,
+    "getsGripper1": 2461157,
+    "putsGripper1": 2461125,
+    "getsGripper2": 2461154,
+    "putsGripper2": 2461126,
+    "temperature": null,
+    "humidity": null
+  }
+]

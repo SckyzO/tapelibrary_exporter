@@ -50,31 +50,112 @@ Prometheus itself uses.
 | `--probe.timeout` | *(multi-target builds only)* Ceiling on each `/probe` request's own deadline | `5s` |
 | `--probe.timeout-offset` | *(multi-target builds only)* Subtracted from Prometheus's scrape timeout when computing a probe's deadline, so the exporter answers before Prometheus abandons the scrape | `0.5s` |
 
-In **single-target builds**, individual collectors may also expose their own flags. The bundled `example` collector does:
+This is a **multi-instance** build, so every collector is the background-refresh
+variant: `--collector.<name>.timeout` bounds one request and
+`--collector.<name>.interval` sets how often the poller refreshes, both applying
+identically to every watched instance. There is no `--collector.<name>.target`,
+since each instance's address comes from `instances:` in the configuration file
+(see below) rather than from a flag, and `--[no-]collector.<name>` toggles the
+collector on or off.
 
-| Flag | Description | Default | Flavor |
-|------|-------------|---------|--------|
-| `--collector.example.timeout` | Per-request/per-command timeout for the `example` collector | `5s` | HTTP and CLI |
-| `--collector.example.target` | Base URL the `example` collector fetches | `https://<library-address>/web/api/v1` | HTTP only |
+This build's own collectors follow that same multi-instance pattern:
 
-In **multi-target builds** (`--target-model multi`), the `example` collector is built fresh per `/probe` request: its target and timeout come from the request (bounded by the `--probe.*` flags above), so it exposes no `--collector.example.*` flags, and multi has no `--[no-]collector.<name>` toggle.
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--collector.library.timeout` | Per-request timeout for the `library` collector | `5s` |
+| `--collector.library.interval` | Background refresh interval for the `library` collector | `5m` |
+| `--[no-]collector.library` | Enable or disable the `library` collector | enabled |
+| `--collector.frames.timeout` | Per-request timeout for the `frames` collector | `5s` |
+| `--collector.frames.interval` | Background refresh interval for the `frames` collector | `5m` |
+| `--[no-]collector.frames` | Enable or disable the `frames` collector | enabled |
+| `--collector.accessors.timeout` | Per-request timeout for the `accessors` collector | `5s` |
+| `--collector.accessors.interval` | Background refresh interval for the `accessors` collector | `5m` |
+| `--[no-]collector.accessors` | Enable or disable the `accessors` collector | enabled |
+| `--collector.drives.timeout` | Per-request timeout for the `drives` collector | `5s` |
+| `--collector.drives.interval` | Background refresh interval for the `drives` collector | `5m` |
+| `--[no-]collector.drives` | Enable or disable the `drives` collector | enabled |
+| `--collector.drives.per-volser` | Emit `tapelibrary_drive_loaded_cartridge_info`, labelling each drive with the cartridge it currently holds. Off by default: only 40 volsers are loaded at once, but the drive holding a given tape changes constantly, so `location` x `volser` accumulates an index entry in Prometheus for every pairing that has ever existed | `false` |
+| `--collector.power_supplies.timeout` | Per-request timeout for the `power_supplies` collector | `5s` |
+| `--collector.power_supplies.interval` | Background refresh interval for the `power_supplies` collector | `5m` |
+| `--[no-]collector.power_supplies` | Enable or disable the `power_supplies` collector | enabled |
+| `--collector.node_cards.timeout` | Per-request timeout for the `node_cards` collector | `5s` |
+| `--collector.node_cards.interval` | Background refresh interval for the `node_cards` collector | `5m` |
+| `--[no-]collector.node_cards` | Enable or disable the `node_cards` collector | enabled |
+| `--collector.io_stations.timeout` | Per-request timeout for the `io_stations` collector | `5s` |
+| `--collector.io_stations.interval` | Background refresh interval for the `io_stations` collector | `5m` |
+| `--[no-]collector.io_stations` | Enable or disable the `io_stations` collector | enabled |
+| `--collector.fc_ports.timeout` | Per-request timeout for the `fc_ports` collector | `5s` |
+| `--collector.fc_ports.interval` | Background refresh interval for the `fc_ports` collector | `5m` |
+| `--[no-]collector.fc_ports` | Enable or disable the `fc_ports` collector | enabled |
+| `--collector.logical_libraries.timeout` | Per-request timeout for the `logical_libraries` collector | `5s` |
+| `--collector.logical_libraries.interval` | Background refresh interval for the `logical_libraries` collector | `5m` |
+| `--[no-]collector.logical_libraries` | Enable or disable the `logical_libraries` collector | enabled |
+| `--collector.cleaning_cartridges.timeout` | Per-request timeout for the `cleaning_cartridges` collector | `5s` |
+| `--collector.cleaning_cartridges.interval` | Background refresh interval for the `cleaning_cartridges` collector | `5m` |
+| `--[no-]collector.cleaning_cartridges` | Enable or disable the `cleaning_cartridges` collector | enabled |
+| `--collector.cleaning_cartridges.per-volser` | Emit one `cleans_remaining` gauge and one last-usage timestamp per cleaning cartridge. On by default, unlike `--collector.drives.per-volser`: the population is bounded by cleaning policy rather than library capacity, and only the per-cartridge series can name which cartridge to pull. Turning it off drops those two families and nothing else — the library-wide aggregates the supply alerts read are emitted either way | `true` |
+| `--collector.data_cartridges.timeout` | Per-request timeout for the `data_cartridges` collector. **Higher than every other collector's**: `GET /v1/dataCartridges` returns the library's entire inventory (9 749 entries on this fleet) unpaginated over the slow SCSI/LCC path, which 5s does not fetch | `60s` |
+| `--collector.data_cartridges.interval` | Background refresh interval for the `data_cartridges` collector. **Longer than most collectors', and shared with `slots`**: at a ceiling of one in-flight request per library, a refresh this size holds the slot against its siblings while it runs, and a cartridge inventory does not turn over in minutes | `15m` |
+| `--[no-]collector.data_cartridges` | Enable or disable the `data_cartridges` collector | enabled |
+| `--collector.data_cartridges.per-volser` | Emit one `_info`, one lifetime-remaining ratio and one last-usage timestamp per data cartridge. Off by default, like `--collector.drives.per-volser` and unlike the cleaning-cartridge flag: at ~9 750 cartridges per library this is ~29 250 extra series per library and ~146 000 across a five-library fleet, which is a Prometheus sizing decision rather than a monitoring one. Turning it on adds those three families and changes no aggregate, so no alert depends on it | `false` |
+| `--collector.slots.timeout` | Per-request timeout for the `slots` collector. Higher than the shared `5s` but below `data_cartridges`: `GET /v1/slots` walks the whole slot inventory over the same slow path, but returns one entry per slot **column** (roughly 4 300) rather than one per cartridge | `30s` |
+| `--collector.slots.interval` | Background refresh interval for the `slots` collector. Matched to `data_cartridges` rather than split between it and the shared `5m`: the two describe the same physical movement, so there is nothing to gain from learning about it twice as often on one endpoint as on the other | `15m` |
+| `--[no-]collector.slots` | Enable or disable the `slots` collector | enabled |
+| `--collector.slots.per-slot` | Emit one `_info`, one occupancy gauge and the three lifetime robotics counters per storage slot. Off by default, like `--collector.data_cartridges.per-volser`: at roughly 4 300 slots per library this is about 21 500 extra series per library and five times that across the fleet. Turning it on adds those five families and changes no aggregate, so no alert depends on it — it is what names *which* slot a rising retry rate comes from | `false` |
+| `--collector.events.timeout` | Per-request timeout for the `events` collector. Back to the shared `5s`, because the lookback below makes this one of the cheapest endpoints rather than one of the heaviest: the reference capture is 42 events over 3h45m | `5s` |
+| `--collector.events.interval` | Background refresh interval for the `events` collector | `5m` |
+| `--[no-]collector.events` | Enable or disable the `events` collector | enabled |
+| `--collector.events.lookback` | How far back the collector asks the library to look, sent as the endpoint's `after` parameter. **Not a tuning knob.** R1.11.2 states a bare `GET /v1/events` returns *every* event the library has recorded, so without this each refresh would re-download the whole history over the slow path. Must exceed `--collector.events.interval`, or events landing between two refreshes are never counted; the rest of the default is slack for clock skew between this host and the library, which would otherwise silently empty the window while refreshes kept succeeding | `1h` |
+| `--collector.events.error-codes` | Comma-separated library error codes to break out as `tapelibrary_events_by_code`, e.g. `"B792,0217"`. Empty by default, which suppresses that family entirely: `errorCode` is a 4-digit hex field R1.11.2 never enumerates, so naming codes explicitly is the only bounded form. Matching is case-insensitive and the label carries the library's own spelling. The severity breakdown every shipped alert reads is emitted regardless | *(empty)* |
+| `--collector.data_cartridges_lifetime.timeout` | Per-request timeout for the `data_cartridges_lifetime` collector. Takes `data_cartridges`' figure outright rather than deriving its own: this endpoint walks the *same* 9 749-cartridge inventory over the same slow path, reading each cartridge's memory. It returns fewer bytes per entry (~280 against ~640), but the bytes are not what makes it slow — the inventory walk is, and that walk is identical | `60s` |
+| `--collector.data_cartridges_lifetime.interval` | Background refresh interval for the `data_cartridges_lifetime` collector. Matches `data_cartridges` for a second reason on top of the timeout's: the two describe the same cartridges, and at a ceiling of one in-flight request per library there is nothing to gain from polling one twice as often as the other. Lifetime counters move slower than inventory, if anything | `15m` |
+| `--[no-]collector.data_cartridges_lifetime` | Enable or disable the `data_cartridges_lifetime` collector | enabled |
+| `--collector.reports_library.timeout` | Per-request timeout for the `reports_library` collector. Stays at the common default: the response is the last week of hourly entries (~67 KB) and involves no inventory walk | `5s` |
+| `--collector.reports_library.interval` | Background refresh interval for the `reports_library` collector. The first interval in this file chosen against the *data's* cadence rather than the endpoint's cost: R1.11.2 publishes one report per completed hour, so polling faster returns the same window again. A quarter of that bounds how long a freshly published window sits unseen without pretending the exporter can resolve anything finer | `15m` |
+| `--[no-]collector.reports_library` | Enable or disable the `reports_library` collector | enabled |
+| `--collector.reports_drives.timeout` | Per-request timeout for the `reports_drives` collector. Higher than the common default, in line with `data_cartridges`: the response is a week of hourly windows for *every* drive, ~3.3 MB on a 40-drive library against `reports_library`'s ~67 KB | `60s` |
+| `--collector.reports_drives.interval` | Background refresh interval for the `reports_drives` collector. Matches the endpoint's own hourly publication cadence rather than quartering it as `reports_library` does, because here the repetition is expensive: re-transferring ~3.3 MB four times an hour to re-read the same 40 rows blocks this library's other collectors, the concurrency ceiling being 1. The cost is that a freshly published window can sit up to an hour unseen, which `tapelibrary_drive_report_window_timestamp_seconds` makes visible | `1h` |
+| `--[no-]collector.reports_drives` | Enable or disable the `reports_drives` collector | enabled |
+| `--collector.reports_accessors.timeout` | Per-request timeout for the `reports_accessors` collector. Generous relative to the ~148 KB response, and a deliberate departure from `reports_library`'s `5s`: the RoE path can be slow in ways payload size does not predict, and a timeout that fires leaves the cache empty rather than late | `60s` |
+| `--collector.reports_accessors.interval` | Background refresh interval for the `reports_accessors` collector. Quarters the endpoint's hourly publication as `reports_library` does, rather than matching it as `reports_drives` does: a library has two accessors, so the default week is ~168 windows × 2, roughly 148 KB, and re-reading that costs little. The gain is that a freshly published window is visible within 15 minutes rather than up to an hour, which matters on the one endpoint whose alert is about an accessor having stopped | `15m` |
+| `--[no-]collector.reports_accessors` | Enable or disable the `reports_accessors` collector | enabled |
+| `--collector.diagnostic_cartridges.timeout` | Per-request timeout for the `diagnostic_cartridges` collector | `5s` |
+| `--collector.diagnostic_cartridges.interval` | Background refresh interval for the `diagnostic_cartridges` collector. Deliberately unhurried: the population changes only when somebody physically loads or removes a cartridge | `5m` |
+| `--collector.diagnostic_cartridges.per-volser` | Emit `tapelibrary_diagnostic_cartridge_info`, `..._last_usage_timestamp_seconds` and `..._lifetime_remaining_ratio`, one set per diagnostic cartridge. **On by default**, like `--collector.cleaning_cartridges.per-volser` and unlike the two data-cartridge flags: the population is bounded by service policy rather than by library capacity (five on the reference fleet), and only the per-cartridge series can name which cartridge to pull. Turning it off takes the collector from 23 series to 11 and silences no alert — both supply rules read library-wide aggregates emitted either way | `true` |
+| `--[no-]collector.diagnostic_cartridges` | Enable or disable the `diagnostic_cartridges` collector | enabled |
+| `--collector.data_cartridges_lifetime.per-volser` | Emit the four per-cartridge lifetime counter families (`_motion_meters_total`, `_mounts_total`, `_written_bytes_total` and the four `_errors_total` combinations), one set per data cartridge. Off by default, like `--collector.data_cartridges.per-volser`, and the largest per-object cost in the exporter: seven series per cartridge against that flag's three, so ~68 250 extra series per library and ~341 000 across a five-library fleet. Turning it on adds those four families and changes no aggregate, so no alert depends on it — it is what names *which* cartridge a rising uncorrected-error count comes from | `false` |
 
-In **multi-instance builds** (`--target-model multi-instance`), the `example` collector is the background-refresh variant: `--collector.example.timeout` and `--collector.example.interval` (background refresh period, default `5m`) apply the same way to every watched instance, but there is no `--collector.example.target`, since each instance's address comes from `instances:` in the configuration file (see below), not a flag. `--[no-]collector.example` still toggles it on or off, same as single-target.
-
-There is no single global command/request timeout: each collector owns its own, following
-the `example` collector's pattern above. Run `--help` after adding your own collectors to see
-the full, current flag list.
+There is no single global command/request timeout: each collector owns its own, on the
+pattern above, so a slow endpoint can be given room without loosening every other one.
+Run `--help` to see the full, current flag list.
 
 ### Available collectors
 
 | Collector | Default | Description |
 |-----------|---------|-------------|
-| `example` | enabled | Starter collector: replace with your real data source (see `CONTRIBUTING.md`) |
+| `library` | enabled | Library status, capacity and cartridge counters, and identity, from `GET /v1/library` |
+| `frames` | enabled | Per-frame state, door positions, slot/cartridge/drive/IO-station counts and identity, from `GET /v1/frames` |
+| `accessors` | enabled | Per-accessor state, drive/cartridge reachability, and lifetime robotics counters, from `GET /v1/accessors` |
+| `drives` | enabled | Per-drive state, current operation, accessor reachability, last-cleaned time and identity, from `GET /v1/drives` |
+| `power_supplies` | enabled | Per-supply health state, from `GET /v1/powerSupplies`. Supplies sit in a redundant pair per frame, so one leaving `online` costs redundancy rather than service |
+| `node_cards` | enabled | Per-card state, identity, last-restart time and LCC primary/reporting roles, from `GET /v1/nodeCards`. Keyed by `location` **and** `card_type`: an accessor carries two cards at one location |
+| `io_stations` | enabled | Per-station state, door position and magazine occupancy, from `GET /v1/ioStations`. Cartridge VOLSERs are counted, never labelled; the magazine series are absent while no magazine is reported rather than zeroed |
+| `fc_ports` | enabled | Per-port Fibre Channel link state, negotiated rate and SAN identity, from `GET /v1/fcPorts`. Keyed by `location` alone (the port number is baked into it); `drive_location` rides on the measurement series so a dark port can be joined against drive state |
+| `logical_libraries` | enabled | Per-partition drive, virtual-slot, virtual-I/O-slot and cartridge counts plus identity, from `GET /v1/logicalLibraries`. The only collector with no stateset: the endpoint reports capacity, not health. Cartridges divided by virtual slots is the partition's saturation, and at 1 it refuses imports while the physical library still reports free slots |
+| `cleaning_cartridges` | enabled | Cleaning supply: per-cartridge cleans-remaining and last-usage time plus library-wide counts by state, total cleans left and a usable count, from `GET /v1/cleaningCartridges`. Keyed by `volser` **and** `location` — a barcode is not unique, and this endpoint legitimately reports two cartridges under one. The only collector that accepts an empty array, because a library really can run out |
+| `data_cartridges` | enabled | The cartridge inventory, aggregated: counts by state per partition, by media and cartridge type, by encryption, by WORM and by accessor reach, plus a remaining-media-life histogram, from `GET /v1/dataCartridges`. The largest endpoint the exporter reads, hence its own `60s`/`15m` defaults. 45% of cartridges report no cartridge memory at all, so `cartridge_type`, `worm` and `encrypted` carry an `unknown` value and a null `lifetimeRemaining` is counted separately rather than observed as 0 — the manual defines 0% as at risk of data loss. Per-cartridge detail is behind `--collector.data_cartridges.per-volser`, off by default |
+| `slots` | enabled | Storage-slot capacity and robotics health, aggregated: slot and cartridge-position counts by state, the tier-depth distribution, and library-wide sums of the lifetime `puts`/`putRetries`/`getRetries` counters, from `GET /v1/slots`. A slot entry is a **column** holding up to five stacked tiers, and its `location` carries no tier suffix — unlike a cartridge location from `data_cartridges` — so capacity is counted over positions, never over entries. `tapelibrary_slots_positions_available` excludes free positions in service-mode slots, which the robot may not target, and is the one capacity figure `library` cannot produce. Per-slot detail is behind `--collector.slots.per-slot`, off by default |
+| `events` | enabled | The library event log over a trailing window: counts by severity and the most recent event time per severity, from `GET /v1/events?after=…`. The only collector here that reads a log rather than hardware, so its gauges cover the last `--collector.events.lookback` and fall back to zero as events age out — never `rate()` them. `inactiveError` and `inactiveWarning` mean **resolved**, so alerting matches the bare severities exactly rather than by regex. `state`, `description`, `user` and `location` are deliberately not labelled: the first two are interpolated free text carrying PMR numbers, the other two are unbounded. Per-code detail is behind `--collector.events.error-codes`, empty by default |
+| `data_cartridges_lifetime` | enabled | Per-cartridge lifetime usage counters, aggregated: distributions of tape motion, mounts, bytes written and the four error counters, from `GET /v1/dataCartridges/lifetimeMetrics`. The only endpoint handing over genuine monotonic device counters, so the per-cartridge series are the exporter's only `_total` counters. **Its metrics are prefixed `tapelibrary_data_cartridges_usage_`, not `..._lifetime_`** — `data_cartridges` already owns that prefix for media life *remaining*, and this reads work *done*. Walks the same 9 749-cartridge inventory as `data_cartridges`, hence the same `60s`/`15m` defaults. A cartridge with no usable reading is counted under `..._usage_unknown{reason}` rather than observed as 0: `unread` (no cartridge memory, 39% of the reference capture, benign) and `invalid` (a negative or partial counter — the capture holds one cartridge reporting `motionMeters` of -285 211 648) are counted apart. Per-cartridge detail is behind `--collector.data_cartridges_lifetime.per-volser`, off by default |
+| `reports_library` | enabled | The library's own hourly activity and environmental report, newest completed window only, from `GET /v1/reports/library`. **Its metrics are prefixed `tapelibrary_library_report_`, not `..._reports_library_`** — the subsystem names the resource with `report` as the qualifier, the shape the two sibling `reports_*` collectors will follow. Every metric is a Gauge, including the activity figures: these are per-window quantities that restart from zero each hour, so `rate()` is meaningless on them. The window is chosen by its own `time` field rather than by array position, since the manual documents no ordering. `..._window_timestamp_seconds` is the guard that matters: a library that stops publishing windows keeps serving its last one at full *refresh* freshness, and only that gauge ages. Temperature and humidity are six separate metrics rather than a `stat` label, and are absent rather than zero when no drive reported |
+| `reports_drives` | enabled | The same hourly publication as `reports_library`, resolved to the individual drive, from `GET /v1/reports/drives`, plus the per-drive error figures the library-wide report does not carry at all. **Its metrics are prefixed `tapelibrary_drive_report_`**, keyed by `location`, which joins to `tapelibrary_drive_info` and `tapelibrary_drive_state`. The drive's serial is deliberately not re-emitted: `tapelibrary_drive_info` already carries it against the same key. The three error figures are three metric names rather than one carrying a `direction` label, following Prometheus's own exporter guidance, which names read/write as the canonical case for separate metrics; the endpoint reports `errorsUncorrected` with no direction breakdown anyway. Window selection is **per drive**, so a drive that went offline part-way through the week keeps its own last reported hour instead of being dropped, and `..._window_timestamp_seconds` is per drive for the same reason: a single drive falling out of the report is exactly what a library-wide timestamp would hide. This is the most expensive endpoint per byte in the exporter — see its two flags above |
+| `reports_accessors` | enabled | The same hourly publication as its two `reports_*` siblings, resolved to the individual robotic accessor, from `GET /v1/reports/accessors`. **Its metrics are prefixed `tapelibrary_accessor_report_`**, keyed by `location`, which joins to `tapelibrary_accessor_state` and `tapelibrary_accessor_info`. Every metric here is the **per-window counterpart of a lifetime counter `accessors` already emits** — that pairing is the point: `tapelibrary_accessor_gets_total` has accumulated into the millions and barely moves when an accessor stops, while the hourly window it stops contributing to drops to zero at once. All are therefore Gauges with no `_total` suffix. `gets` and `puts` are two metric names (Prometheus's own guidance on read/write-shaped pairs) while `gripper` and `axis` are labels, because the library reports those cross products completely. Window selection is **per accessor**, and `..._window_timestamp_seconds` is per accessor for the same reason. The six environmental metrics emit nothing on this fleet: these accessors carry no temperature or humidity sensor and report null in every window, exactly as `/v1/accessors` does — they are shipped absent-never-zero so hardware that does report them needs no code change |
+| `diagnostic_cartridges` | enabled | The cartridges the library keeps for its own service actions, from `GET /v1/diagnosticCartridges`. Never read or written by a host, so the only question worth alerting on is availability — `tapelibrary_diagnostic_cartridges_usable` intersects state `normal` with accessor reachability, because a cartridge the robot cannot reach is one the library cannot select. **An empty response is a real reading of zero here, not an error**, unlike on every other cartridge endpoint: a library with no diagnostic cartridge is one nobody has loaded a cartridge into, and zero is exactly what `DiagnosticCartridgesExhausted` must be able to see. Carries a full per-state stateset, which the cardinality budget permits at five cartridges and forbids at 9 749 — `data_cartridges` carries state as an `_info` label for that reason. Most of these cartridges report no cartridge memory at all (three of five in the reference capture), so nullable labels take the token `unknown` and nullable measurements emit nothing; `tapelibrary_diagnostic_cartridges_lifetime_unknown` counts the second case |
 | `http_client_requests` *(HTTP flavor)* | enabled | Self-instrumentation: HTTP request duration by outcome |
 | `command_exec` *(CLI flavor)* | enabled | Self-instrumentation: command execution duration by outcome |
 
-Both the `example` collector and the self-instrumentation histogram are registered through the
-same `--[no-]collector.<name>` mechanism: there is nothing special about self-instrumentation
+Collectors and the self-instrumentation histogram are registered through the same
+`--[no-]collector.<name>` mechanism: there is nothing special about self-instrumentation
 from the flag's point of view.
 
 ### Enabling and disabling collectors
@@ -91,7 +172,7 @@ Use `--[no-]collector.<name>` (kingpin boolean syntax) to enable or disable a co
 
 ```bash
 ./tapelibrary_exporter \
-  --collector.example.timeout=10s \
+  --collector.drives.timeout=10s \
   --log.level=debug \
   --log.format=json
 ```
@@ -459,7 +540,7 @@ promtool check-config prometheus.yml
 
 ### Internal exporter metrics
 
-Every collector, including the bundled `example` one, is wrapped by a shared status tracker
+Every collector is wrapped by a shared status tracker
 that emits two self-monitoring metrics regardless of what the collector itself reports:
 
 | Metric | Description | Labels |

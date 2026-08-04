@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -322,5 +323,82 @@ func TestClientWithLimiterIsTotalEvenWithoutABoundedAcquireWait(t *testing.T) {
 	c := NewClientFor("http://example.invalid", &http.Client{}) // Timeout left at zero
 	if got := c.WithLimiter(NewLimiter(1)); got != c {
 		t.Fatal("WithLimiter did not return the same Client")
+	}
+}
+
+// TestFetchChargesTheQueueWaitSeparatelyFromTheRequest is the regression test
+// for the starvation found on 2026-08-03, the first time this exporter ran
+// against real hardware.
+//
+// With a concurrency ceiling of 1 — which the TS4500 requires, since R1.11.2
+// has each REST response retrieved before the next command is sent — a queue
+// in front of the limiter is the NORMAL state, not a fault. Fetch used to
+// apply the collector's own timeout to the context BEFORE waiting for a slot,
+// so a collector queued behind its siblings spent its whole budget waiting
+// and had nothing left for a request that takes a fraction of it. Fourteen of
+// nineteen collectors starved on every sweep, permanently, because
+// same-interval tickers all fire together.
+//
+// The test holds the only slot for longer than the second client's request
+// timeout, then releases it. The second Fetch must still succeed: its timeout
+// governs the request, and the queue budget governs the wait.
+func TestFetchChargesTheQueueWaitSeparatelyFromTheRequest(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer srv.Close()
+
+	tr := NewTransport(&http.Client{})
+	lim := NewLimiter(1)
+
+	// Occupy the single slot for 300ms, well past the queued client's own
+	// 100ms request timeout.
+	holder := NewClientOn(tr, srv.URL, time.Second).WithLimiter(lim).WithQueueBudget(5 * time.Second)
+	release, err := holder.acquire(context.Background())
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		release()
+	}()
+
+	queued := NewClientOn(tr, srv.URL, 100*time.Millisecond).WithLimiter(lim).WithQueueBudget(5 * time.Second)
+	start := time.Now()
+	if _, err := queued.Fetch(context.Background(), "/library"); err != nil {
+		t.Fatalf("Fetch after queueing = %v, want nil: the wait must not consume the request budget", err)
+	}
+	if waited := time.Since(start); waited < 250*time.Millisecond {
+		t.Errorf("Fetch returned after %v, want >= 250ms: it should have queued behind the holder", waited)
+	}
+}
+
+// TestFetchStillBoundsTheQueueWait pins the other half of the split: the wait
+// is bounded, not merely moved off the request's budget. A collector that
+// cannot get a slot within its queue budget fails fast and lets the next tick
+// try again, rather than piling up behind a machine that has stopped.
+func TestFetchStillBoundsTheQueueWait(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer srv.Close()
+
+	tr := NewTransport(&http.Client{})
+	lim := NewLimiter(1)
+
+	holder := NewClientOn(tr, srv.URL, time.Second).WithLimiter(lim).WithQueueBudget(time.Second)
+	release, err := holder.acquire(context.Background())
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	defer release() // never released during the test: the slot stays taken
+
+	queued := NewClientOn(tr, srv.URL, time.Minute).WithLimiter(lim).WithQueueBudget(50 * time.Millisecond)
+	_, err = queued.Fetch(context.Background(), "/library")
+	if err == nil {
+		t.Fatal("Fetch with the slot permanently held returned nil, want a queue-wait error")
+	}
+	if !strings.Contains(err.Error(), "wait for a request slot") {
+		t.Errorf("error = %v, want it to name the queue wait rather than the request", err)
 	}
 }

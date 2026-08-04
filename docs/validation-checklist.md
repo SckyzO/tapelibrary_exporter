@@ -32,10 +32,12 @@ toolchain (`scripts/docker/tools/`). The only host requirement is a container en
 ```bash
 cd "$(git rev-parse --show-toplevel)"
 git status --short
-make check      # vet + lint + test + vuln + actionlint + zizmor + deadcode + docs-check, containerized
+make check      # vet + lint + test + vuln + actionlint + zizmor + deadcode + docs-check + rules-check, containerized
 make report     # offline goreportcard.com equivalent, containerized
 make build      # full ldflags build (produces bin/tapelibrary_exporter)
-bin/tapelibrary_exporter --version
+bin/tapelibrary_exporter --version; echo "exit=$?"
+bin/tapelibrary_exporter --help >/dev/null; echo "exit=$?"
+bin/tapelibrary_exporter >/dev/null 2>&1; echo "no-config exit=$?"
 ```
 
 ### Expected
@@ -51,6 +53,19 @@ bin/tapelibrary_exporter --version
   never fused into the version string itself. For an unreleased build, `<VERSION>` comes from
   `git describe --tags --always --dirty --abbrev=7` and typically looks like `v0.2.0-dirty` or
   `v0.2.0-3-gabcdef1`, depending on how many commits/tags exist since the last tag.
+- **`--version` and `--help` both exit 0**, and neither needs `--config.file`. Check the exit
+  code, not just the output: this build requires `--config.file` to run, and a regression that
+  enforced it too early made both of them print that refusal and exit 1 instead (fixed
+  2026-08-04). Packaging, CI and container healthchecks all call `--version` on a binary they
+  have no configuration for.
+- **Running it with no arguments still exits 1**, with
+  `the multi-instance target model requires --config.file`. That refusal is required behaviour,
+  not a bug: the two assertions above must not be satisfied by weakening it.
+
+> **Run this step against the artefact `make build` produces, never a bare `go build`.**
+> The 2026-08-04 regression above was invisible to every other check in this file, because
+> every one of them starts the exporter *with* a configuration file rather than asking the
+> binary to describe itself.
 
 ### If it fails
 
@@ -91,11 +106,13 @@ unreachable target produces noise, not signal.
 
 ## Step 3 - Restart the exporter with every collector and debug logs
 
-The quickest local run uses whatever collector flags you're used to. For a proper validation
-run, restart it with **every collector on** and `--log.level=debug` so you can see everything
-it does. For a fresh scaffold, both `example` and the self-instrumentation collector already
-default to enabled, so only `example` needs to be passed explicitly below; add one
-`--collector.<name>` per collector you've added since.
+Restart it with `--log.level=debug` so you can see everything it does. Every collector
+defaults to enabled, so none needs to be named explicitly; pass `--no-collector.<name>` only
+to take one out.
+
+`--config.file` is **mandatory** on this multi-instance build: it is what lists the libraries
+to watch, and there is no flag equivalent. Point it at a file describing at least one real
+target.
 
 ### Command
 
@@ -103,9 +120,9 @@ default to enabled, so only `example` needs to be passed explicitly below; add o
 pkill -f tapelibrary_exporter 2>/dev/null
 sleep 1
 nohup bin/tapelibrary_exporter \
+  --config.file=/etc/tapelibrary_exporter/config.yml \
   --web.listen-address=:9170 \
   --log.level=debug \
-  --collector.example \
   > /tmp/exporter.log 2>&1 &
 sleep 2
 curl -s http://localhost:9170/healthz
@@ -149,9 +166,17 @@ grep -cE "level=ERROR|level=WARN" /tmp/exporter.log
 
 ### Expected
 
-- HTTP 200, scrape duration well under 1 second against a quiet target.
-- Metric series count >= 1 per enabled collector (a fresh scaffold with just the `example`
-  collector and its self-instrumentation histogram already exposes several series).
+- HTTP 200, scrape duration well under 1 second. A scrape never contacts a library: every
+  collector serves its cache, so this is fast even while a refresh is in flight.
+- Metric series count >= 1 per enabled collector. Expect a few thousand per watched library
+  (the reference fleet ranges 2 566 to 5 473, scaling with drive count; see
+  `docs/exporter-journal.md`'s cardinality budget).
+- **A collector reporting `tapelibrary_exporter_collector_success 1` is not proof it has
+  data.** That metric says Collect returned something, and a background collector always
+  returns at least its freshness gauge. Check
+  `tapelibrary_<subsystem>_last_refresh_timestamp_seconds` is non-zero for every collector:
+  a `0` means no refresh has ever completed. `CollectorNeverRefreshed` alerts on exactly
+  this, and on 2026-08-03 all nineteen collectors reported success while collecting nothing.
 - **0 errors and 0 warnings** in the log file.
 
 ### If it fails

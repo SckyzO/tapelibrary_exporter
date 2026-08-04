@@ -194,7 +194,24 @@ only need Docker or Podman, no host Go install required.
 
 <!-- BEGIN GENERATED COLLECTORS -->
 <!-- Regenerated from docs/metrics.md. Edits inside this block are overwritten. -->
-- [`example`](docs/metrics.md#examplecollector)
+- [`library`](docs/metrics.md#librarycollector)
+- [`frames`](docs/metrics.md#framescollector)
+- [`accessors`](docs/metrics.md#accessorscollector)
+- [`drives`](docs/metrics.md#drivescollector)
+- [`power_supplies`](docs/metrics.md#powersuppliescollector)
+- [`node_cards`](docs/metrics.md#nodecardscollector)
+- [`io_stations`](docs/metrics.md#iostationscollector)
+- [`fc_ports`](docs/metrics.md#fcportscollector)
+- [`logical_libraries`](docs/metrics.md#logicallibrariescollector)
+- [`cleaning_cartridges`](docs/metrics.md#cleaningcartridgescollector)
+- [`data_cartridges`](docs/metrics.md#datacartridgescollector)
+- [`slots`](docs/metrics.md#slotscollector)
+- [`events`](docs/metrics.md#eventscollector)
+- [`data_cartridges_lifetime`](docs/metrics.md#datacartridgeslifetimecollector)
+- [`reports_library`](docs/metrics.md#reportslibrarycollector)
+- [`reports_drives`](docs/metrics.md#reportsdrivescollector)
+- [`reports_accessors`](docs/metrics.md#reportsaccessorscollector)
+- [`diagnostic_cartridges`](docs/metrics.md#diagnosticcartridgescollector)
 <!-- END GENERATED COLLECTORS -->
 
 Every metric this exporter can emit, grouped by collector, is documented in

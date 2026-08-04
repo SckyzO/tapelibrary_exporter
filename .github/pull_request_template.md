@@ -15,7 +15,7 @@ refactor, test, ci...). See git log on the default branch for examples.
 
 <!-- Tick what applies. Skip what doesn't. -->
 
-- [ ] `make check` (containerized vet + lint + test + vuln + actionlint + zizmor + deadcode + docs-check) passes
+- [ ] `make check` (containerized vet + lint + test + vuln + actionlint + zizmor + deadcode + docs-check + rules-check) passes
 - [ ] `make report` stays at grade B or better (aim for A/A+)
 - [ ] New behavior covered by a unit test
 - [ ] `make race` passes if the change touches concurrent code

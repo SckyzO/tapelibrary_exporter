@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"reflect"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -55,8 +56,9 @@ type Handle struct {
 	Name    string
 	Address string
 
-	tr      *collector.Transport
-	limiter *collector.Limiter
+	tr          *collector.Transport
+	limiter     *collector.Limiter
+	queueBudget time.Duration
 
 	// labels are the identifying and extra labels this machine's series
 	// carry. Applied by prometheus.WrapRegistererWith at REGISTRATION, with
@@ -79,6 +81,15 @@ type Handle struct {
 	// ones, without the collectors ever noticing.
 	tracker *collector.StatusTracker
 
+	// session is the RoE login/logout handshake this machine's transport
+	// carries, or nil when no credentials are configured. Kept so shutdown
+	// and removal can END the session: the library's session table is
+	// finite and R1.11.2 documents no idle eviction, so an exporter that
+	// exits without logging out leaks one session per instance per restart
+	// until the machine refuses to open another. Replaced, and the old one
+	// ended, whenever a reload swaps the transport.
+	session *collector.SessionTransport
+
 	cancel context.CancelFunc
 	bgs    []BackgroundCollector
 }
@@ -86,13 +97,14 @@ type Handle struct {
 // NewHandle builds a handle for one machine. hc is the client its collectors
 // share, built once from the instance's resolved module. limit is
 // --exporter.max-requests-per-target; 0 means unlimited.
-func NewHandle(name, address string, hc *http.Client, limit int, labels prometheus.Labels) *Handle {
+func NewHandle(name, address string, hc *http.Client, limit int, labels prometheus.Labels, queueBudget time.Duration) *Handle {
 	return &Handle{
-		Name:    name,
-		Address: address,
-		tr:      collector.NewTransport(hc),
-		limiter: collector.NewLimiter(limit),
-		labels:  labels,
+		Name:        name,
+		Address:     address,
+		tr:          collector.NewTransport(hc),
+		limiter:     collector.NewLimiter(limit),
+		labels:      labels,
+		queueBudget: queueBudget,
 	}
 }
 
@@ -108,7 +120,7 @@ func (h *Handle) ClientFor(timeout time.Duration) (*collector.Client, error) {
 	if timeout <= 0 {
 		return nil, fmt.Errorf("instance %q: a collector timeout must be positive, got %v (the shared transport carries no timeout of its own)", h.Name, timeout)
 	}
-	return collector.NewClientOn(h.tr, h.Address, timeout).WithLimiter(h.limiter), nil
+	return collector.NewClientOn(h.tr, h.Address, timeout).WithLimiter(h.limiter).WithQueueBudget(h.queueBudget), nil
 }
 
 // SetTransport installs a new shared client and returns the one it replaced, so
@@ -150,6 +162,13 @@ type Registry struct {
 	factories     []Factory // already filtered to the globally-enabled ones
 	limit         int       // --exporter.max-requests-per-target
 
+	// queueBudget is --exporter.max-queue-wait: how long a collector may wait
+	// for this machine's single request slot before giving up the round. It
+	// is separate from any collector's own request timeout, because with a
+	// ceiling of 1 a queue is the normal state and a collector's position in
+	// it says nothing about how long its own request needs.
+	queueBudget time.Duration
+
 	handles map[string]*Handle // live, by instance name
 
 	// labelKeys is the sorted set of extra instance label KEYS this registry
@@ -168,13 +187,14 @@ type Registry struct {
 // NewRegistry builds an empty registry. root is the exporter's own registry;
 // each instance's collectors are registered on a wrapper of it carrying that
 // instance's labels.
-func NewRegistry(log *logger.Logger, root prometheus.Registerer, instanceLabel string, factories []Factory, limit int) *Registry {
+func NewRegistry(log *logger.Logger, root prometheus.Registerer, instanceLabel string, factories []Factory, limit int, queueBudget time.Duration) *Registry {
 	return &Registry{
 		log:           log,
 		root:          root,
 		instanceLabel: instanceLabel,
 		factories:     factories,
 		limit:         limit,
+		queueBudget:   queueBudget,
 		handles:       make(map[string]*Handle),
 	}
 }
@@ -219,6 +239,7 @@ type relabelOp struct {
 type retransportOp struct {
 	handle       *Handle
 	client       *http.Client
+	session      *collector.SessionTransport
 	clientConfig *promconfig.HTTPClientConfig
 }
 
@@ -264,12 +285,13 @@ func (r *Registry) Prepare(instances []config.ResolvedInstance) (*Plan, error) {
 		// so a factory that fails (a non-positive timeout, or a reason of its
 		// own) fails the whole reload before anything has been started.
 		if !live || cur.Address != inst.Address {
-			hc, err := clientFor(inst.ClientConfig)
+			hc, session, err := clientFor(inst.ClientConfig, inst.Address)
 			if err != nil {
 				return nil, fmt.Errorf("instance %q: %w", inst.Name, err)
 			}
-			h := NewHandle(inst.Name, inst.Address, hc, r.limit, labels)
+			h := NewHandle(inst.Name, inst.Address, hc, r.limit, labels, r.queueBudget)
 			h.clientConfig = inst.ClientConfig
+			h.session = session
 
 			tracker := collector.NewStatusTracker(r.log)
 			var bgs []BackgroundCollector
@@ -297,13 +319,14 @@ func (r *Registry) Prepare(instances []config.ResolvedInstance) (*Plan, error) {
 			p.relabel = append(p.relabel, &relabelOp{handle: cur, newLabels: labels})
 		}
 		if !reflect.DeepEqual(cur.clientConfig, inst.ClientConfig) {
-			hc, err := clientFor(inst.ClientConfig)
+			hc, session, err := clientFor(inst.ClientConfig, inst.Address)
 			if err != nil {
 				return nil, fmt.Errorf("instance %q: %w", inst.Name, err)
 			}
 			p.retransport = append(p.retransport, &retransportOp{
 				handle:       cur,
 				client:       hc,
+				session:      session,
 				clientConfig: inst.ClientConfig,
 			})
 		}
@@ -414,13 +437,52 @@ func diffKeys(live, newKeys []string) (added, removed []string) {
 // clientFor builds the shared *http.Client for one instance. A nil resolved
 // config means the default transport, exactly as it did before this package
 // owned the construction.
-func clientFor(hcfg *promconfig.HTTPClientConfig) (*http.Client, error) {
+// It also installs the RoE session handshake, which is what makes this
+// exporter able to authenticate against real hardware: the TS4500 accepts no
+// HTTP authentication scheme at all, so basic_auth's credentials are POSTed
+// to /v1/login and the resulting cookie rides every request. See
+// collector.SessionTransport, which documents why that is a transport
+// concern rather than a configuration one.
+//
+// BasicAuth is deliberately STRIPPED from the copy handed to NewHTTPClient.
+// The credentials are consumed by the login handshake instead, and leaving
+// the block in place would additionally send an Authorization header to a
+// server that ignores it — credentials on the wire for no purpose. The copy
+// is shallow, which is enough: only the BasicAuth pointer is cleared, and
+// the caller's config is never mutated.
+//
+// With no basic_auth configured there is no session and no wrapper: the
+// transport is exactly what it was before this existed. That keeps every
+// test in this package, and any deployment against a target that needs no
+// authentication, on the path they already ran.
+func clientFor(hcfg *promconfig.HTTPClientConfig, address string) (*http.Client, *collector.SessionTransport, error) {
 	if hcfg == nil {
-		return &http.Client{}, nil
+		return &http.Client{}, nil, nil
 	}
+
+	user, password, err := collector.SessionCredentials(hcfg)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	cfg := *hcfg
+	if user != "" {
+		cfg.BasicAuth = nil
+	}
+
 	// The per-request deadline lives on each collector's Client, not here: this
 	// transport is shared by collectors whose timeouts differ.
-	return collector.NewHTTPClient(*hcfg, 0)
+	hc, err := collector.NewHTTPClient(cfg, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	if user == "" {
+		return hc, nil, nil
+	}
+
+	session := collector.NewSessionTransport(hc.Transport, address, user, password)
+	hc.Transport = session
+	return hc, session, nil
 }
 
 // Commit applies a prepared plan. It cannot fail: every construction that
@@ -465,10 +527,25 @@ func (r *Registry) Commit(ctx context.Context, p *Plan) {
 
 	for _, op := range p.retransport {
 		old := op.handle.SetTransport(op.client)
+		oldSession := op.handle.session
+		op.handle.session = op.session
 		// Store what the new transport was built FROM, or the next reload will
 		// compare against the stale config and swap the transport again on
 		// every single reload.
 		op.handle.clientConfig = op.clientConfig
+		// End the session the REPLACED credentials opened, on its own
+		// goroutine so a reload never blocks on a machine that has gone
+		// away. Skipping this would leak one session per credential
+		// rotation, and rotating credentials is exactly when the old account
+		// may already have been disabled on the library.
+		if oldSession != nil {
+			// context.Background, deliberately, NOT Commit's ctx: that one is
+			// scoped to the reload and is cancelled as soon as Commit
+			// returns, which would abort the logout it was started to
+			// perform. endSession applies its own bounded budget instead, so
+			// this is a goroutine with a deadline, not one without.
+			go endSession(oldSession, op.handle, r.log) //nolint:gosec // G118: the logout must outlive the reload that triggered it; endSession bounds it
+		}
 		if old != nil {
 			// Only IDLE connections close, so a request in flight on the old
 			// client finishes undisturbed. Without this the old transport holds
@@ -515,10 +592,45 @@ func (h *Handle) drain(budget time.Duration, log *logger.Logger) {
 		case <-bg.Done():
 		case <-deadline:
 			log.Warn("a removed instance's background collectors did not all stop within the drain budget", "instance", h.Name, "address", h.Address)
+			// Log out anyway. A poller that overran its budget is
+			// unreferenced, not holding the session, and leaving the session
+			// open is the more expensive of the two failures.
+			endSession(h.session, h, log)
 			return
 		}
 	}
+	// Only once the pollers have stopped: logging out from under a refresh
+	// that is still in flight would fail that refresh for no reason.
+	endSession(h.session, h, log)
 }
+
+// endSession ends one machine's RoE session, bounded so a machine that has
+// gone away cannot hold up a shutdown or a reload. A nil session (no
+// credentials configured) is a no-op, as is a session that never logged in.
+//
+// Failure is logged, never returned: by the time this runs the caller is
+// already shutting the instance down and has nothing left to do about it.
+// The log line matters anyway — a session this exporter failed to end is one
+// the library holds until it decides otherwise, and a run of these is what
+// explains a later "too many sessions" refusal.
+func endSession(s *collector.SessionTransport, h *Handle, log *logger.Logger) {
+	if s == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), sessionLogoutBudget)
+	defer cancel()
+	if err := s.Logout(ctx); err != nil {
+		log.Warn("could not end the session for an instance; the library will hold it until it expires on its own",
+			"instance", h.Name, "address", h.Address, "err", err)
+	}
+}
+
+// sessionLogoutBudget bounds each logout. Short on purpose: it runs during
+// shutdown, after the HTTP server has already stopped, so every second here
+// is a second the process takes to exit. One round trip to a machine that is
+// answering takes milliseconds; a machine that is not answering is exactly
+// the case this must not wait for.
+const sessionLogoutBudget = 3 * time.Second
 
 // Wait blocks until every live instance's pollers have exited, under ONE shared
 // budget rather than one per instance or one per collector: with N instances by
@@ -549,8 +661,38 @@ func (r *Registry) Wait(budget time.Duration) {
 			case <-bg.Done():
 			case <-deadline:
 				r.log.Warn("background collectors did not all stop within the shutdown budget; exiting anyway")
+				// Still end every session before returning. The pollers are
+				// unreferenced at this point and a leaked session outlives
+				// the process, so this is the one piece of shutdown work
+				// worth doing even after the budget is spent.
+				r.endSessions()
 				return
 			}
 		}
 	}
+	r.endSessions()
+}
+
+// endSessions logs every live instance out, concurrently and under one
+// bounded budget each, so five libraries cost one logout's latency rather
+// than five. Called by Wait once the pollers have stopped, which is the last
+// thing this process does with the network.
+//
+// Concurrent rather than sequential specifically because of the failure
+// case: a machine that has gone away burns the full sessionLogoutBudget, and
+// doing that five times in series would add fifteen seconds to a shutdown
+// for sessions that are already lost.
+func (r *Registry) endSessions() {
+	var wg sync.WaitGroup
+	for _, h := range r.handles {
+		if h.session == nil {
+			continue
+		}
+		wg.Add(1)
+		go func(h *Handle) {
+			defer wg.Done()
+			endSession(h.session, h, r.log)
+		}(h)
+	}
+	wg.Wait()
 }
