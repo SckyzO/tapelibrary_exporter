@@ -2157,6 +2157,54 @@ library, so it exercises perhaps a third of the enumerated states.
   (`prometheus/common` exposes the full `ProxyConfig`, and `net/http` speaks
   `socks5`/`socks5h` natively) or an `ssh -L` port forward instead.
 
+- 2026-08-05 **first publication, and the two releases it took to get an install
+  path that works.** `main` had never been merged into and no tag had ever
+  existed, so `git describe --always` was handing commit hashes to
+  `version.Version`: a freshly built binary announced itself as `448db06`. The
+  branch merged `--no-ff` and `v0.1.0` was cut, after the four gates `## Release
+  process` requires (`check`, `report` at grade A/93.27%, `race`, `build`).
+  **The history was rewritten with `git filter-repo` immediately before the first
+  push**, and this is the entry to remember when a hash in this file or in any
+  older note fails to resolve: every commit predating 2026-08-05 has a new hash.
+  Only `docs/exporter-journal.md` had ever carried the fleet's real FQDNs, the IP
+  `192.0.2.10`'s real counterpart, and a local path; the sanitisation `b88c520`
+  applied to the working tree was replayed across all 21 commits with the same
+  placeholders this file already used. The exporter's own code was never
+  affected, and the monitoring password never entered the history at all. Prefer
+  `git log --oneline --grep=…` over any recorded hash from here on.
+  **`v0.1.1` followed the same day, and its content is a lesson rather than a
+  feature.** Both compose files started the exporter with neither `--config.file`
+  nor a mounted configuration, so `make docker-run` — a path the README
+  documents as an install method — produced a container that exited at once and,
+  with `restart: unless-stopped`, crash-looped, while the Makefile printed
+  `Metrics at http://localhost:9170/metrics`. `config.example.yml` was no better:
+  it shipped an active `flags:` section and **no `instances:` block**, the one
+  section this target model refuses to boot without, so copying it was not enough
+  either. The same file documented scraping through `/probe?target=…&module=…`,
+  a route this binary does not register (`/`, `/healthz`, `/metrics`, `/-/reload`
+  are the four it does), and gave module examples using a `collectors:` key that
+  a multi-instance build refuses — contradicting its own prose twelve lines
+  above. `config.yml`, the name both compose files mount and the one anybody
+  reaches by copying the example, was not gitignored.
+  **The generalisation is worth more than the four fixes.** The lesson recorded
+  after the first deployment was that a suite pointing at an instant-200
+  `httptest` is silent on authentication, latency and concurrency. This session
+  widens it: 337 tests and four green gates are also silent on **whether the
+  documented install path runs at all**, because nothing in them ever launches
+  the binary or the container. Every one of these four defects is visible within
+  ten seconds of typing the command the README gives. So the acceptance test for
+  anything a reader is told to run is to run it: the fixes here were verified by
+  `cp config.example.yml config.yml` with no editing, then `make docker-run` and
+  `make docker-run-minimal`, each serving `/metrics` with HTTP 200 and 99 series
+  against an address that does not resolve — collectors failing, exporter up,
+  which is the correct posture facing an unreachable library.
+  **All six defects are scaffold residue, not local mistakes**, and were reported
+  upstream: the generated files describe every target model and I/O flavor rather
+  than the ones this exporter was given. A generated repository should satisfy
+  two properties this one did not — the documented install path serves `/metrics`
+  with no manual editing, and no file mentions a model or flavor that was not
+  chosen.
+
 ## Open questions / assumptions
 
 **What is still open, at a glance.** Every entry below carries a status tag, so
@@ -2878,3 +2926,25 @@ were resolved by contradicting what they originally assumed.
 - `[ACCEPTED]` **Adding an instance label key later requires a restart.** `model` is included from
   the start for exactly this reason. Any further per-instance dimension (site, floor,
   owner) is cheap to add now and expensive to add after the first deployment.
+- `[OPEN]` **Serving the libraries' raw JSON from this exporter's cache, for the
+  InfluxDB consumer.** A colleague already ingests the same five libraries into
+  InfluxDB through RoS/ITDT, post-processing the raw RoE JSON with roughly 80 `jq`
+  invocations. Exposing that JSON straight out of this exporter's existing cache
+  would let that pipeline survive with a one-line change, and would remove a
+  *second* interrogator from machines whose LCC and robotics path serialize
+  internally — the same argument that pinned `exporter.max-requests-per-target`
+  to 1. The cost was estimated at roughly 60–75 MB resident, since it means
+  keeping the decoded payloads rather than discarding them after parse.
+  **Three things must be settled before any of this reaches code.** (1) *Which
+  endpoints that pipeline actually consumes* — the estimate above assumes all of
+  them, and the scope is what decides the memory figure. Nobody has asked. (2)
+  *Whether this exporter should have a second reason to exist.* A Prometheus
+  exporter that also serves raw upstream JSON couples a public surface to one
+  colleague's script; the alternative is a separate tiny service reading the same
+  API, which costs the very thing this proposal buys — one fewer interrogator.
+  (3) *What the route contract is*: raw passthrough pins this exporter to IBM's
+  schema forever, including whatever R1.11.2 gets wrong, and every field the
+  libraries expose becomes something this project appears to promise.
+  Recorded 2026-08-05 because the analysis existed only in conversation and was
+  being lost between sessions. It is a **feature**, so it belongs in a minor
+  release and never in a patch.
