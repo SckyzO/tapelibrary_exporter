@@ -25,6 +25,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ### Security     - vulnerability fixes
 -->
 
+## [0.1.2] - 2026-08-05
+
+### Fixed
+
+- **The release archives now contain `config.example.yml`.** They shipped the binary,
+  a `LICENSE` and a `README.md` — and since 0.1.1 that README tells you to copy
+  `config.example.yml` before starting anything, a file the archive did not carry. If
+  you unpacked 0.1.0 or 0.1.1 and went looking for it, it was never there; you needed
+  the repository. `CHANGELOG.md` ships too, which only the development archives had.
+- **A local `goreleaser release` failed before building anything.** GoReleaser folds
+  its `ldflags` into a single string, so a `BUILD_USER` containing a space becomes two
+  linker arguments and the build dies printing the linker's usage — and this
+  repository's own default is `Name <email>`. Only CI escaped it, because
+  `github.actor` happens to be one word. `make release-snapshot` now passes a
+  whitespace-free value, and `docs/release-process.md` states the constraint.
+
+### Changed
+
+- **GoReleaser and syft no longer need to be installed.** Build, test and lint already
+  ran through a pinned container; the release path did not. Three targets now cover it:
+  `make release-check` validates both GoReleaser configs, `make release-snapshot` builds
+  every archive into `dist/` without publishing and prints the archive contents, and
+  `make sbom-image` runs syft containerised. Versions are pinned — GoReleaser at the
+  same `2.16.0` the release workflow uses, so a local snapshot predicts what a tag will
+  produce. **A container engine remains the only requirement to run anything here.**
+- `make sbom-image` reads the image from a read-only tarball instead of mounting
+  `/var/run/docker.sock`, which had granted that container control of the host engine
+  to do something that only reads one image.
+
 ## [0.1.1] - 2026-08-05
 
 ### Fixed
