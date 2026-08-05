@@ -7,10 +7,13 @@ Grafana health dashboard.
 ```
 monitoring/
 ├── grafana/
-│   └── health-dashboard.json   Collector health, scrape duration, build info
+│   ├── health-dashboard.json    Collector health, scrape duration, build info
+│   └── provisioning/            Datasource + dashboard provider (stack only)
 └── prometheus/
     ├── alerts.yml               Alerting rules (severity-based, site-neutral)
-    └── rules.yml                Recording rules (pre-computed expressions)
+    ├── prometheus.yml           Complete config for docker-compose.stack.yml
+    ├── rules.yml                Recording rules (pre-computed expressions)
+    └── scrape-config.example.yml  Fragment to merge into an existing Prometheus
 ```
 
 **Boundary: alerting is a Prometheus concern (core, shipped here); dashboards
@@ -27,6 +30,30 @@ your own `prometheus.yml`, with the two rule files beside it.
 library in its `--config.file` and serves them all through one `/metrics`, so
 `instance` is the exporter's host and `library` is the machine. Group and alert
 by `library`.
+
+## Running the whole thing
+
+If you have no Prometheus to merge that fragment into — or you want one watching
+a real fleet before committing to thresholds — `docker-compose.stack.yml` at the
+repository root brings up the exporter, Prometheus and Grafana together, with
+`prometheus/prometheus.yml` and the dashboards in `grafana/` provisioned
+automatically:
+
+```bash
+cp config.example.yml config.yml     # then put your libraries in it
+make docker-build
+docker compose -f docker-compose.stack.yml up -d
+```
+
+Prometheus lands on `:9090` with both rule files loaded, Grafana on `:3000`.
+Every `.json` in `grafana/` is picked up at startup, so a dashboard added to
+this directory needs no import step.
+
+Two things to know before running it anywhere real. It is **not** hardened the
+way `docker-compose.yml` is — Grafana starts on `admin/admin` and every port is
+published — so it belongs on a machine you control. And its Prometheus keeps 30
+days in a named volume: `docker compose … down` preserves that history, `down
+-v` deletes it, which matters because accumulating that history is the point.
 
 ## Two tiers, one pattern
 

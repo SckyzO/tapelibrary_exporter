@@ -194,6 +194,7 @@ scrape_configs:
 | | `make docker-run` | Starts the compose stack (override `DOCKER_IMAGE=`/`DOCKER_TAG=`) |
 | | `make docker-build-minimal` | Builds the minimal, distroless image tagged `tapelibrary_exporter:dev-minimal` |
 | | `make docker-run-minimal` | Starts the minimal compose stack (`container_name` and `HOST_PORT`, see [Docker](#docker) above) |
+| | `docker compose -f docker-compose.stack.yml up -d` | Runs the exporter, Prometheus and Grafana together, for confirming alert thresholds and building dashboards against real series (see [monitoring/README.md](monitoring/README.md)) |
 | | `make sbom-image` | Generates a CycloneDX SBOM for the container image via a pinned `syft` container (run after `make docker-build`) |
 | | `make release-check` | Validates both GoReleaser configs without building anything |
 | | `make release-snapshot` | Builds every release archive into `dist/` and publishes nothing; prints the archive contents |
