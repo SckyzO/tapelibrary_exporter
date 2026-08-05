@@ -200,18 +200,34 @@ vuln: native-warning tools-image
 # `*.example.yml` is excluded by convention rather than by name: that directory
 # also holds a scrape-config fragment, which is YAML for Prometheus but is not
 # a rule file, and promtool rightly refuses it. Excluding one filename would
-# have re-broken the moment a second example landed. Anything else matching
-# *.yml there IS treated as a rule file and must parse.
+# have re-broken the moment a second example landed.
+#
+# `prometheus.yml` is excluded BY NAME, and it is the one exception the
+# convention above cannot cover: it is a complete Prometheus configuration for
+# docker-compose.stack.yml, not an example of one, so naming it
+# `prometheus.example.yml` would lie about what it is. It gets the check it
+# actually needs instead - `promtool check config` - with the rule files copied
+# to the paths it references, so a broken scrape config fails the build here
+# rather than when the stack refuses to start.
+#
+# Anything else matching *.yml in that directory IS treated as a rule file and
+# must parse.
 .PHONY: rules-check
 rules-check: native-warning tools-image
 	@if [ ! -d monitoring/prometheus ]; then \
 	  echo "Skipping rules-check: no monitoring/prometheus/ found"; \
 	else \
-	  echo "Running promtool check rules (monitoring/prometheus/*.yml, excluding *.example.yml)"; \
+	  echo "Running promtool check rules (monitoring/prometheus/*.yml, excluding *.example.yml and prometheus.yml)"; \
 	  $(IN_TOOLS) -c 'set -eu; \
-	    files=$$(find monitoring/prometheus -maxdepth 1 -name "*.yml" ! -name "*.example.yml" | sort); \
+	    files=$$(find monitoring/prometheus -maxdepth 1 -name "*.yml" ! -name "*.example.yml" ! -name "prometheus.yml" | sort); \
 	    if [ -z "$$files" ]; then echo "Skipping rules-check: no rule files found"; exit 0; fi; \
-	    promtool check rules $$files'; \
+	    promtool check rules $$files; \
+	    if [ -f monitoring/prometheus/prometheus.yml ]; then \
+	      echo "Running promtool check config (monitoring/prometheus/prometheus.yml)"; \
+	      mkdir -p /etc/prometheus/rules; \
+	      cp $$files /etc/prometheus/rules/; \
+	      promtool check config monitoring/prometheus/prometheus.yml; \
+	    fi'; \
 	fi
 
 .PHONY: actionlint
