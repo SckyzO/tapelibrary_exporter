@@ -68,7 +68,16 @@ These targets need a `Dockerfile` and `docker-compose.yml` at the repo root. If 
 this repo doesn't have them yet, [build from source](#from-source) above works with no extra
 setup.
 
-Build and run a local image with the bundled Make targets:
+Create the instance list first. This exporter watches several libraries from one process, so
+it refuses to start without `--config.file`, and both compose files mount that file from the
+repository root:
+
+```bash
+cp config.example.yml config.yml    # then edit the addresses in it
+```
+
+`config.yml` is gitignored, so the addresses and credentials of a real fleet cannot reach a
+commit. Then build and run a local image with the bundled Make targets:
 
 ```bash
 make docker-build

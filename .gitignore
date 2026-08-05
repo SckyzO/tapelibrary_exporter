@@ -27,4 +27,11 @@ coverage.*
 /samples/*
 !/samples/README.md
 
+# The real instance list, made by copying config.example.yml. It holds the
+# addresses of an actual fleet and, if basic_auth is enabled inline rather
+# than via password_file, its credentials. Both compose files mount this
+# path, so it is the name everyone ends up creating - which is exactly why
+# it must never be committable. config.example.yml stays tracked.
+/config.yml
+
 .DS_Store

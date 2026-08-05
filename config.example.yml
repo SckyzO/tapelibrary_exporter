@@ -57,20 +57,13 @@ flags:
     - ":9170"
     - "127.0.0.1:19101"
 
-  # A collector's own flags follow the same rule as any built-in flag.
-  # Commented out because this file ships with both target models and a
-  # multi-target exporter declares no collector.example.* flags: its target
-  # arrives per request on /probe rather than from a flag. Uncomment it on a
-  # single-target exporter, where the flag exists.
-  # collector.example.timeout: 10s
+  # A collector's own flags follow the same rule as any built-in flag, so
+  # anything `--collector.<name>.<setting>` accepts on the command line can be
+  # written here under its own flag name instead.
 
-  # Bounds how many outbound requests/commands this exporter has in flight
-  # at once. 0 (the default) means unlimited. Available on single-target and
-  # multi-instance builds only: a multi-target exporter has no such flag, see
-  # docs/configuration.md's "Bounding outbound concurrency" section for what
-  # this actually bounds on each build (per target address on single-target
-  # HTTP, exporter-wide on single-target CLI, per watched instance on
-  # multi-instance).
+  # Bounds how many outbound requests this exporter has in flight at once,
+  # per watched instance. 0 (the default) means unlimited. See
+  # docs/configuration.md's "Bounding outbound concurrency" section.
   # Set to 1 here on purpose: the TS4500's LCC and robotics path serialize
   # internally, so a second concurrent request buys nothing and risks
   # degrading the very machine this exporter observes. The cost is that a
@@ -79,10 +72,9 @@ flags:
   exporter.max-requests-per-target: 1
 
 # http_client_config carries the authentication and TLS settings no flag can
-# express. It only applies to an HTTP-flavor exporter's outbound requests. A
-# CLI-flavor exporter runs a local command instead, so it has nothing to
-# authenticate: given this section it refuses to start rather than accept a
-# setting it would silently drop.
+# express, and applies to this exporter's outbound requests to the libraries.
+# It is unrelated to --web.config.file, which configures the TLS server this
+# exporter itself exposes.
 #
 # Commented out here on purpose: an active block pointing at password_file/
 # ca_file/cert_file/key_file paths that do not exist on your machine would
@@ -161,60 +153,45 @@ flags:
 #     server_name: library1.example.internal
 #     insecure_skip_verify: false
 
-# modules: named credential/TLS bundles this exporter can select. What reads
-# this section, and how a module gets picked, depends on the target model
-# this exporter was scaffolded with:
+# instances: the libraries this exporter watches. THIS SECTION IS REQUIRED.
+# One process serves all of them through one /metrics, and it refuses to start
+# without at least one entry, so this is the section to edit after copying this
+# file to config.yml.
 #
-# - single-target builds refuse this section outright at boot: it does not
-#   apply there at all.
-# - multi-target builds (/probe) select a module per request with
-#   /probe?target=...&module=...; there, a module may carry both a
-#   collectors: subset and an http_client_config:.
-# - multi-instance builds have each instances: entry reference a module by
-#   name in its own module: key (see docs/configuration.md), resolved once
-#   at boot rather than per request.
-#   There, a module's collectors: key is refused: collector enablement is
-#   global via --[no-]collector.<name> instead, so a per-module subset would
-#   be meaningless.
+#   name     becomes the `library` label on every series this instance emits,
+#            so it must be unique and stable: renaming one breaks the
+#            continuity of its history in Prometheus.
+#   address  the RoE API root, including the /web/api/v1 path.
+#   labels   copied verbatim onto every series from this instance. Keep them
+#            low-cardinality and describe the machine, not its current state.
 #
-# On a multi-target build specifically, credentials never combine: at most
-# one of the modules a request selects may carry an http_client_config:, and
-# naming two is refused with a 400 rather than resolved by a precedence
-# nobody wrote. A module that lists no collectors contributes only its
-# credentials, which is what lets a credentials module be combined with
-# collector modules.
+# Prometheus scrapes THIS EXPORTER once, not the five libraries: `instance` is
+# the exporter's own host and `library` names the machine. Group and alert by
+# `library`. See monitoring/prometheus/scrape-config.example.yml.
+instances:
+  - name: library1
+    address: https://library1.example.internal/web/api/v1
+    labels:
+      model: ts4500
+
+  # - name: library2
+  #   address: https://library2.example.internal/web/api/v1
+  #   labels:
+  #     model: ts4500
+
+# modules: named credential/TLS bundles, selected by name rather than applied
+# globally. Each instances: entry above may carry a module: key naming one of
+# them, resolved once at boot. A module's collectors: key is REFUSED on this
+# build: collector enablement is global, via --[no-]collector.<name>, so a
+# per-module subset would be meaningless. See docs/configuration.md.
 #
-# On a multi-target build, this section and the top-level http_client_config:
-# above cannot both be set: with modules declared, nothing reads the
-# top-level one. (Multi-instance tolerates both present, but then the
-# top-level section goes unread too, since every instance resolves its module
-# by name; a known asymmetry, not something to rely on.)
+# Declaring modules leaves the top-level http_client_config: above unread,
+# since every instance resolves its credentials through its own module.
 #
 # Commented out for the same reason as http_client_config: above, an active
 # block pointing at files that do not exist on your machine would fail to load.
 #
-# Two conventions work, and the choice is yours to make here rather than in
-# code, so it is reversible without regenerating anything.
-#
-# Convention 1, one module per group of targets, each a complete bundle:
-#
-# modules:
-#   prod:
-#     collectors: [example]
-#     http_client_config:
-#       basic_auth:
-#         username: monitoring
-#         password_file: /etc/tapelibrary_exporter/prod_password
-#   staging:
-#     collectors: [example]
-#     http_client_config:
-#       basic_auth:
-#         username: monitoring
-#         password_file: /etc/tapelibrary_exporter/staging_password
-#
-#   Scraped with: /probe?target=...&module=prod
-#
-# Convention 2, credentials and collector subsets as independent axes:
+# This earns its keep when the fleet does not share one monitoring account:
 #
 # modules:
 #   default:
@@ -222,8 +199,17 @@ flags:
 #       basic_auth:
 #         username: monitoring
 #         password_file: /etc/tapelibrary_exporter/password
-#   quick:
-#     collectors: [example]
+#       tls_config:
+#         insecure_skip_verify: true
+#   legacy:
+#     http_client_config:
+#       basic_auth:
+#         username: monitoring
+#         password_file: /etc/tapelibrary_exporter/legacy_password
+#       tls_config:
+#         insecure_skip_verify: true
 #
-#   Scraped with: /probe?target=...&module=quick
-#   (the default module supplies the credentials; naming it is optional)
+# instances:
+#   - name: library1
+#     address: https://library1.example.internal/web/api/v1
+#     module: legacy
