@@ -1,0 +1,42 @@
+# Complete Prometheus configuration for docker-compose.stack.yml.
+#
+# This is NOT scrape-config.example.yml. That file is a fragment, meant to be
+# merged into a Prometheus you already run. This one is a whole configuration
+# for the Prometheus the stack brings up, and the two are kept apart on
+# purpose: collapsing them would leave one of the two audiences editing a file
+# that does not fit their situation.
+
+global:
+  scrape_interval: 1m
+  evaluation_interval: 1m
+
+rule_files:
+  - /etc/prometheus/rules/alerts.yml
+  - /etc/prometheus/rules/rules.yml
+
+scrape_configs:
+  # Prometheus watching itself. Cheap, and it answers "is the stack healthy"
+  # separately from "is the exporter healthy", which matters when a panel is
+  # empty and either could be the cause.
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - localhost:9090
+
+  # The exporter, once - NOT the five libraries. One process serves all of them
+  # through one /metrics, so `instance` is the exporter and `library` names the
+  # machine. Group and alert by `library`.
+  - job_name: tapelibrary
+    scrape_interval: 1m
+
+    # Generous relative to the scrape itself, which serves caches and returns in
+    # milliseconds. It covers the exporter being briefly busy rather than a
+    # library being slow: a slow library delays a background refresh and shows
+    # up as a stale freshness gauge, never as a slow scrape.
+    scrape_timeout: 30s
+
+    static_configs:
+      - targets:
+          # The compose service name. Docker's embedded DNS resolves it on the
+          # stack's own network.
+          - tapelibrary_exporter:9170

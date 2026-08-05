@@ -1,0 +1,104 @@
+# tapelibrary_exporter: the exporter, Prometheus and Grafana together.
+#
+# WHAT THIS IS FOR: watching a real fleet long enough to be useful - confirming
+# alert thresholds that ship as re-derived defaults rather than measured ones,
+# and writing dashboards against series that exist rather than against metric
+# names in the documentation.
+#
+# THIS STACK IS NOT HARDENED, unlike docker-compose.yml beside it. Grafana
+# starts on admin/admin and all three ports are published. That is reasonable
+# on a network you control and unreasonable anywhere else. It is a validation
+# stack, not a deployment.
+#
+# Before the first run:
+#
+#   cp config.example.yml config.yml     # then put your libraries in it
+#   make docker-build                    # builds tapelibrary_exporter:dev
+#   docker compose -f docker-compose.stack.yml up -d
+#
+# config.yml is gitignored, so real addresses and credentials stay out of git.
+#
+#   exporter     http://localhost:9170/metrics
+#   Prometheus   http://localhost:9090     targets, alerts, expression browser
+#   Grafana      http://localhost:3000     admin/admin
+#
+# `docker compose -f docker-compose.stack.yml down` keeps the history in the
+# named volumes below. `down -v` deletes it - which, for a stack whose whole
+# purpose is accumulating weeks of it, is the command to be careful with.
+
+services:
+  # The service name is load-bearing: monitoring/prometheus/prometheus.yml
+  # scrapes this exact hostname.
+  tapelibrary_exporter:
+    image: ${IMAGE:-tapelibrary_exporter:dev}
+    container_name: tapelibrary_exporter-stack
+    restart: unless-stopped
+    ports:
+      - "${EXPORTER_PORT:-9170}:9170"
+    volumes:
+      - ./config.yml:/etc/tapelibrary_exporter/config.yml:ro
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    command:
+      - --config.file=/etc/tapelibrary_exporter/config.yml
+      - --web.listen-address=:9170
+      - --log.level=info
+      # Per-cartridge detail, off as it ships. Turning both on takes the fleet
+      # from roughly 18 060 series to roughly 500 000, and 30 days of retention
+      # from ~1.5 GB to tens of GB. What it buys is naming WHICH cartridges to
+      # migrate - topk(20, tapelibrary_data_cartridge_lifetime_remaining_ratio) -
+      # where the aggregates only count them. Watch prometheus_tsdb_head_series
+      # after enabling rather than trusting that estimate.
+      # - --collector.data_cartridges.per-volser
+      # - --collector.data_cartridges_lifetime.per-volser
+
+  prometheus:
+    image: prom/prometheus:v3.13.2
+    container_name: prometheus-stack
+    restart: unless-stopped
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/alerts.yml:/etc/prometheus/rules/alerts.yml:ro
+      - ./monitoring/prometheus/rules.yml:/etc/prometheus/rules/rules.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      # 30 days. The point of this stack is history: a threshold cannot be
+      # confirmed against a fleet observed for an afternoon.
+      - --storage.tsdb.retention.time=30d
+      - --web.enable-lifecycle
+
+  grafana:
+    image: grafana/grafana:13.1.2
+    container_name: grafana-stack
+    restart: unless-stopped
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    environment:
+      # Change these if the stack is reachable by anyone you would rather not
+      # hand a Grafana to.
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      # Nothing here is worth phoning home about.
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    depends_on:
+      - prometheus
+
+volumes:
+  # Named, so `down` keeps the weeks of history that are the entire reason for
+  # running this.
+  prometheus-data:
+  grafana-data:
