@@ -25,6 +25,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ### Security     - vulnerability fixes
 -->
 
+## [0.1.1] - 2026-08-05
+
+### Fixed
+
+- **The documented Docker install path could never have worked.** Both
+  `docker-compose.yml` and `docker-compose.minimal.yml` started the exporter without
+  `--config.file` and mounted no configuration, so the container exited immediately
+  with `the multi-instance target model requires --config.file`; with
+  `restart: unless-stopped` also set, it crash-looped, while `make docker-run`
+  cheerfully printed `Metrics at http://localhost:9170/metrics`. Both files now mount
+  `./config.yml` read-only at `/etc/tapelibrary_exporter/config.yml` and pass the
+  flag. **If you scripted anything around `make docker-run`, it was failing silently
+  until now.**
+- **`config.example.yml` did not start after being copied**, which is the only thing
+  anyone does with it. It shipped an active `flags:` section but no `instances:` — the
+  one section this exporter cannot boot without. It now carries a placeholder instance,
+  so `cp config.example.yml config.yml` is enough to get a running exporter serving
+  `/metrics`; the collectors will report failures until the address points at a real
+  library, which is the correct behavior rather than a defect.
+- **`config.example.yml` documented an endpoint this exporter does not serve.** Its
+  `modules:` section explained scraping through `/probe?target=…&module=…`, a route
+  belonging to a different target model; the routes actually registered are `/`,
+  `/healthz`, `/metrics` and `/-/reload`. Its two module examples also used a
+  `collectors:` key that this build refuses, and named the example collector removed
+  before 0.1.0. The section is now written for this exporter alone.
+- **`config.yml` is now ignored by git.** It is the file both compose stacks mount and
+  the name everyone reaches by copying the example, so it is the one most likely to
+  collect a real fleet's addresses and credentials and then be committed by reflex.
+  `config.example.yml` stays tracked.
+
 ## [0.1.0] - 2026-08-05
 
 First tagged release. Everything below describes the exporter as it stands at this
