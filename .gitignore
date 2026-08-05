@@ -6,6 +6,12 @@
 /bin/
 /linux/
 
+# GoReleaser's output directory. docs/release-process.md's step 9 suggests
+# running `goreleaser release --clean` (or --snapshot) locally when there is no
+# forge to do it, and that writes every cross-compiled archive, checksum and
+# SBOM here.
+/dist/
+
 # CycloneDX SBOM for the container image, produced by `make sbom-image`
 # (glob future-proofs against any syft output name, not just today's
 # <name>.image.cdx.json).

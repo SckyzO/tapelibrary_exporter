@@ -27,6 +27,8 @@ builds:
       - amd64
     binary: "{{ .ProjectName }}"
     main: "./cmd/tapelibrary_exporter"
+    # BUILD_USER must be whitespace-free here too; see the release config's
+    # comment on the same block.
     ldflags:
       - "-s -w"
       - "-X=github.com/prometheus/common/version.Version={{.Version}}"
@@ -44,6 +46,9 @@ archives:
       - README.md
       - LICENSE
       - CHANGELOG.md
+      # Same reason as the release archive: the README says to copy this file,
+      # so the archive has to carry it.
+      - config.example.yml
 
 checksum:
   name_template: "{{ .ProjectName }}_checksums.txt"

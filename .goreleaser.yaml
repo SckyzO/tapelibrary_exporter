@@ -41,6 +41,13 @@ builds:
       - arm64
     binary: "{{ .ProjectName }}"
     main: "./cmd/tapelibrary_exporter"
+    # BUILD_USER must not contain whitespace. GoReleaser joins these entries
+    # into one -ldflags string, and a value with a space becomes two linker
+    # arguments - the build then dies printing the linker's usage. Quoting the
+    # value here does NOT help (verified); the fix belongs at the call site,
+    # which is why every caller passes a single token: CI passes github.actor,
+    # and `make release-snapshot` passes git's user.email, matching what
+    # docker-build already does.
     ldflags:
       - "-s -w"
       - "-X=github.com/prometheus/common/version.Version={{.Version}}"
@@ -54,9 +61,18 @@ builds:
 archives:
   - id: tapelibrary_exporter-release-archive
     name_template: "{{ .ProjectName }}-{{ .Version }}-{{ .Os }}-{{ .Arch }}"
+    # config.example.yml is not decoration: this exporter refuses to start
+    # without --config.file, and the bundled README tells the reader to copy
+    # that file. Shipping the README without it hands out an instruction
+    # pointing at something the archive does not contain.
+    # CHANGELOG.md rides along for the same reason it is written the way it is
+    # - it addresses whoever deploys this, who is exactly the person holding
+    # this archive.
     files:
       - README.md
       - LICENSE
+      - CHANGELOG.md
+      - config.example.yml
 
 checksum:
   name_template: "{{ .ProjectName }}_checksums.txt"

@@ -386,15 +386,37 @@ git push origin vX.Y.Z
 If you use the GitHub layer, CI's release workflow picks up the tag, re-verifies the build
 (`make check`), then runs GoReleaser, which cross-compiles, signs, SBOMs, and publishes the
 binaries and container images (see [Security & supply chain](../README.md#security--supply-chain)).
-Without a forge, run the equivalent locally: `goreleaser release --clean` (or
-`--snapshot` to build without publishing).
+Without a forge, run the equivalent locally:
+
+```bash
+make release-snapshot   # builds every archive into dist/, publishes nothing
+```
+
+Like every other target here it runs in a container, so GoReleaser does not need to be
+installed, and it supplies the three environment variables the release workflow sets for
+GoReleaser (`BUILD_USER`, `BUILD_DATE`, `GO_VERSION`) — without them the run dies on
+`map has no entry for key "BUILD_USER"` before building anything.
+
+**`BUILD_USER` must not contain whitespace.** GoReleaser folds its `ldflags` into a single
+string, so `Name <email>` becomes two linker arguments and the build fails printing the
+linker's usage. `make release-snapshot` therefore passes git's `user.email`, matching what
+`make docker-build` already does; CI passes `github.actor` for the same reason. Quoting the
+value inside `.goreleaser.yaml` does not help.
+
+`make release-snapshot` prints the contents of the linux/amd64 archive when it finishes,
+which is the cheapest way to catch a file that should ship and doesn't. To validate both
+GoReleaser configs without building anything:
+
+```bash
+make release-check
+```
 
 GoReleaser's own SBOM step only ever covers the release **archives** (CycloneDX, via its
 `sboms:` block) plus an automatic, registry-embedded **SPDX** attestation on each container
 image (`dockers_v2 … sbom: "true"`), it cannot generate a CycloneDX SBOM for an image it
-builds. For the container image's own canonical CycloneDX SBOM, run `make sbom-image` (needs
-`syft` on `PATH`, the same tool GoReleaser uses for the archives) against the tag you just
-published, e.g.:
+builds. For the container image's own canonical CycloneDX SBOM, run `make sbom-image` (syft,
+the same tool GoReleaser uses for the archives, pulled as a pinned container — nothing to
+install) against the tag you just published, e.g.:
 
 ```bash
 make sbom-image IMAGE=ghcr.io/sckyzo/tapelibrary_exporter:vX.Y.Z

@@ -68,6 +68,22 @@ endif
 TOOLS_IMG := $(EXPORTER_NAME)-tools:latest
 TOOLS_CTX := scripts/docker/tools
 
+# Release-time tooling, pulled as upstream images rather than installed on the
+# machine. Nothing in this repository should require a binary on PATH: the
+# tools image covers the build/test/lint side, and these two cover the release
+# side, so a fresh clone with only a container engine can run everything.
+#
+# GORELEASER_IMG tracks the version release.yml pins for goreleaser-action
+# (2.16.0). Bump the two together or a local snapshot stops predicting what
+# the tag will actually produce, which is the only reason to run one.
+#
+# SYFT_IMG is pinned for the same reason the workflows pin their actions.
+# Note that CI installs syft through anchore/sbom-action, which picks its own
+# version, so these two can legitimately differ - what matters is that the
+# local one is reproducible rather than "whatever latest is today".
+GORELEASER_IMG ?= goreleaser/goreleaser:v2.16.0
+SYFT_IMG       ?= anchore/syft:v1.50.0
+
 # IN_TOOLS is the program every tooling target below hands its command to.
 # Every call site appends "-c '<command>'" itself, mirroring the container
 # path's own tools image `ENTRYPOINT ["/bin/bash"]` (which turns
@@ -368,17 +384,73 @@ docker-run-minimal:
 	IMAGE=$(DOCKER_REF_MINIMAL) $(CONTAINER_ENGINE) compose -f docker-compose.minimal.yml up -d
 	@echo "Metrics at http://localhost:9170/metrics"
 
+# GoReleaser, containerised. docs/release-process.md's step 9 offers
+# `goreleaser release --clean` as the no-forge fallback, which assumed a
+# GoReleaser on PATH and, less obviously, three environment variables the
+# release workflow sets for it: without BUILD_USER, BUILD_DATE and GO_VERSION
+# the run dies on `map has no entry for key "BUILD_USER"` before building
+# anything. These two targets supply all three and need nothing installed.
+#
+# GO_VERSION is resolved INSIDE the container on purpose: this repository
+# deliberately has no host Go toolchain to ask (see the header comment), and
+# the version that matters is the one that will actually compile the binaries.
+#
+# --user keeps every file GoReleaser writes owned by the caller instead of
+# root, and HOME/GOCACHE/GOMODCACHE move the Go caches somewhere that user can
+# actually write - the container's default HOME is / and is not writable for
+# an arbitrary uid.
+# BUILD_USER is git's user.email rather than this Makefile's own BUILD_USER,
+# and that is not an oversight: GoReleaser folds its ldflags into a single
+# string, so a value containing a space ("Name <email>", which is exactly what
+# BUILD_USER defaults to) splits into two linker arguments and the build dies
+# printing the linker's usage. Quoting it in .goreleaser.yaml does not help -
+# this was tried. docker-build already passes user.email for its own build-arg,
+# so this matches an existing choice rather than inventing one, and CI's
+# github.actor is a single token for the same reason.
+GORELEASER_BUILD_USER ?= $(shell git config user.email)
+GORELEASER_RUN = $(CONTAINER_ENGINE) run --rm \
+	--user "$$(id -u):$$(id -g)" \
+	-e HOME=/tmp -e GOCACHE=/tmp/go-build -e GOMODCACHE=/tmp/go-mod \
+	-e BUILD_USER="$(GORELEASER_BUILD_USER)" -e BUILD_DATE="$(BUILD_DATE)" \
+	-v "$(CURDIR):/repo" -w /repo --entrypoint /bin/sh $(GORELEASER_IMG) -c
+
+# Validates both GoReleaser configs without building anything. Cheap enough to
+# run after any edit to either file; a broken config otherwise surfaces only
+# when a tag is already pushed and the release job is the thing that fails.
+.PHONY: release-check
+release-check:
+	@[ "$(CONTAINER_ENGINE)" != none ] || { echo "no container engine (docker or podman) found" >&2; exit 1; }
+	@echo "Validating .goreleaser.yaml and .goreleaser.dev.yaml"
+	@$(GORELEASER_RUN) 'goreleaser check -f .goreleaser.yaml && goreleaser check -f .goreleaser.dev.yaml'
+
+# Full local release build into dist/, publishing nothing. This is what to run
+# before tagging when you want to see what the tag WILL produce - archive
+# contents included, which `release-check` cannot tell you. Signing, SBOMs and
+# image builds are skipped: they need cosign, syft and a registry login, and
+# none of them change what lands in the archives.
+.PHONY: release-snapshot
+release-snapshot:
+	@[ "$(CONTAINER_ENGINE)" != none ] || { echo "no container engine (docker or podman) found" >&2; exit 1; }
+	@echo "Building a snapshot release into dist/ (nothing is published)"
+	@$(GORELEASER_RUN) 'export GO_VERSION="$$(go version)"; exec goreleaser release --snapshot --clean --skip=publish,sign,sbom,docker,announce'
+	@echo "Archive contents:"
+	@tar tzf dist/$(EXPORTER_NAME)-*-linux-amd64.tar.gz
+
 # CycloneDX SBOM for the container image (Tranche A hardening): GoReleaser's
 # own sboms: block (.goreleaser.yaml) can only catalog release ARCHIVES -
 # `artifacts:` never accepts an image value, a documented upstream
 # limitation, not a missing config knob - so the image's own canonical SBOM
 # has to come from a standalone syft invocation instead. This is that
 # invocation: run it after `make docker-build` (or against any other image
-# IMAGE points at). Unlike the four docker-* targets above, this one is NOT
-# gated on CONTAINER_ENGINE/IN_TOOLS - syft itself talks to the local
-# engine/registry directly, so the only real requirement is syft on PATH
-# (already a documented release-time dependency alongside cosign - see
-# .goreleaser.yaml's own header comment).
+# IMAGE points at).
+#
+# syft runs containerised like everything else, and the image reaches it as a
+# tarball in a throwaway directory rather than by mounting
+# /var/run/docker.sock. Mounting the socket would hand this container control
+# of the host's engine - effectively root - to do something that only needs to
+# READ one image, which is a poor trade for a convenience. The tarball is a
+# FILE and not a pipe because syft seeks within the archive: feeding it
+# `save | syft docker-archive:/dev/stdin` fails on "invalid tar header".
 #
 # The image ALSO carries a second, different SBOM layer: dockers_v2's own
 # `sbom: "true"` (.goreleaser.yaml) is a supplementary, buildx-native SPDX
@@ -388,9 +460,15 @@ docker-run-minimal:
 # artifact this target produces; the two are independent and both ship.
 .PHONY: sbom-image
 sbom-image:
-	@command -v syft >/dev/null 2>&1 || { echo "syft not found on PATH - install it (https://github.com/anchore/syft) to generate an image SBOM" >&2; exit 1; }
+	@[ "$(CONTAINER_ENGINE)" != none ] || { echo "no container engine (docker or podman) found" >&2; exit 1; }
 	@echo "Generating $(EXPORTER_NAME).image.cdx.json for $(IMAGE)"
-	syft "$(IMAGE)" -o cyclonedx-json=$(EXPORTER_NAME).image.cdx.json
+	@tmp="$$(mktemp -d)"; mkdir -p "$$tmp/scratch"; \
+	trap 'rm -rf "$$tmp"; [ -s $(EXPORTER_NAME).image.cdx.json ] || rm -f $(EXPORTER_NAME).image.cdx.json' EXIT; \
+	$(CONTAINER_ENGINE) save "$(IMAGE)" -o "$$tmp/image.tar" && \
+	$(CONTAINER_ENGINE) run --rm --user "$$(id -u):$$(id -g)" -e HOME=/tmp \
+		-v "$$tmp/scratch:/tmp" -v "$$tmp/image.tar:/img/image.tar:ro" \
+		-v "$(CURDIR):/repo" -w /repo $(SYFT_IMG) \
+		docker-archive:/img/image.tar -o cyclonedx-json=$(EXPORTER_NAME).image.cdx.json
 	@echo "wrote $(EXPORTER_NAME).image.cdx.json"
 
 # Cleans up build artifacts.
