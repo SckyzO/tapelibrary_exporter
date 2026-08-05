@@ -1,0 +1,22 @@
+# Loads every .json in /var/lib/grafana/dashboards at startup, which the stack
+# mounts from monitoring/grafana/. Dashboards added to that directory appear
+# with no import step.
+#
+# This provisioning directory sits inside the mounted tree, which is harmless:
+# the provider only reads .json, so these YAML files are ignored.
+apiVersion: 1
+
+providers:
+  - name: tapelibrary
+    orgId: 1
+    type: file
+    # Dashboards are files in this repository, so editing one in the UI and
+    # losing it on the next restart would be the confusing outcome. Refusing UI
+    # updates makes the file the single source.
+    disableDeletion: true
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana/dashboards
+      # Subdirectories become Grafana folders, so dashboards can be grouped
+      # later without touching this file.
+      foldersFromFilesStructure: true

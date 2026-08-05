@@ -1,0 +1,16 @@
+# Grafana datasource for docker-compose.stack.yml. Provisioned rather than
+# clicked: a datasource added through the UI lives in Grafana's own database,
+# so it survives exactly as long as the volume and cannot be reviewed.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    # The compose service name, on the stack's own network.
+    url: http://prometheus:9090
+    isDefault: true
+    jsonData:
+      # Matches the scrape interval, so Grafana proposes sensible step values
+      # rather than querying at a resolution the data does not have.
+      timeInterval: 1m
