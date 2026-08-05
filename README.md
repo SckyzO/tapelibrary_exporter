@@ -194,7 +194,9 @@ scrape_configs:
 | | `make docker-run` | Starts the compose stack (override `DOCKER_IMAGE=`/`DOCKER_TAG=`) |
 | | `make docker-build-minimal` | Builds the minimal, distroless image tagged `tapelibrary_exporter:dev-minimal` |
 | | `make docker-run-minimal` | Starts the minimal compose stack (`container_name` and `HOST_PORT`, see [Docker](#docker) above) |
-| | `make sbom-image` | Generates a CycloneDX SBOM for the container image via `syft` (needs `syft` on `PATH`; run after `make docker-build`) |
+| | `make sbom-image` | Generates a CycloneDX SBOM for the container image via a pinned `syft` container (run after `make docker-build`) |
+| | `make release-check` | Validates both GoReleaser configs without building anything |
+| | `make release-snapshot` | Builds every release archive into `dist/` and publishes nothing; prints the archive contents |
 
 `make check`, `make report`, and `make report-deps` run **inside a container**: contributors
 only need Docker or Podman, no host Go install required.
