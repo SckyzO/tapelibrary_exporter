@@ -13,6 +13,14 @@
 #
 #   HOST_PORT=<free-port> make docker-run-minimal
 #
+# Before the first run, create the instance list this exporter cannot start
+# without - the multi-instance target model requires --config.file:
+#
+#   cp config.example.yml config.yml    # then edit the addresses in it
+#
+# config.yml is gitignored on purpose, so a real fleet's addresses and
+# credentials never reach a commit.
+#
 # Environment overrides:
 #
 #   IMAGE       image to run                   default: tapelibrary_exporter:dev-minimal
@@ -25,6 +33,11 @@ services:
     restart: unless-stopped
     ports:
       - "${HOST_PORT:-9170}:9170"
+    volumes:
+      - ./config.yml:/etc/tapelibrary_exporter/config.yml:ro
+      # basic_auth is commented out in config.example.yml, so nothing else is
+      # needed to start. Enable it with password_file and mount that too:
+      #   - ./password:/etc/tapelibrary_exporter/password:ro
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -33,5 +46,6 @@ services:
     tmpfs:
       - /tmp
     command:
+      - --config.file=/etc/tapelibrary_exporter/config.yml
       - --web.listen-address=:9170
       - --log.level=info

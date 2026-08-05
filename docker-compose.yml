@@ -9,6 +9,14 @@
 #   - /tmp is a small in-memory tmpfs, for the rare case something still
 #     wants a writable path (e.g. a library that insists on a temp file).
 #
+# Before the first run, create the instance list this exporter cannot start
+# without - the multi-instance target model requires --config.file:
+#
+#   cp config.example.yml config.yml    # then edit the addresses in it
+#
+# config.yml is gitignored on purpose, so a real fleet's addresses and
+# credentials never reach a commit.
+#
 # Environment overrides:
 #
 #   IMAGE       image to run                   default: tapelibrary_exporter:dev
@@ -21,11 +29,11 @@ services:
     restart: unless-stopped
     ports:
       - "${HOST_PORT:-9170}:9170"
-    # CLI-flavor note: if this exporter's collectors shell out to an external
-    # CLI tool, mount it (and any config/socket it needs) read-only here,
-    # e.g.:
-    # volumes:
-    #   - /path/on/host/to/tool:/usr/local/bin/tool:ro
+    volumes:
+      - ./config.yml:/etc/tapelibrary_exporter/config.yml:ro
+      # basic_auth is commented out in config.example.yml, so nothing else is
+      # needed to start. Enable it with password_file and mount that too:
+      #   - ./password:/etc/tapelibrary_exporter/password:ro
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -34,5 +42,6 @@ services:
     tmpfs:
       - /tmp
     command:
+      - --config.file=/etc/tapelibrary_exporter/config.yml
       - --web.listen-address=:9170
       - --log.level=info
