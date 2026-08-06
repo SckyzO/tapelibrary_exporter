@@ -2217,7 +2217,6 @@ were resolved by contradicting what they originally assumed.
 |---|---|
 | 1 | `dataWrittenToCartridge` is assumed to be DECIMAL megabytes |
 | 4 | Every logical library on this fleet reports `encryptionMethod: "none"`. |
-| 5 | Nobody here knows how this fleet cables the drives' second FC port, and it   decides whether a critical `fc_po… |
 | 6 | R1.11.2 types `fcPorts.portNumber` as a string; the wire sends a number. |
 | 8 | `library.cartridgeAccess` is emitted by nothing. |
 | 9 | `failedToInitialize` is in the `accessors` critical selector on the manual's word   alone. |
@@ -2350,18 +2349,40 @@ were resolved by contradicting what they originally assumed.
   that makes it auditable, and a rule watching for it *changing* is the useful
   shape rather than one watching for its value.
 
-- `[OPEN]` **Nobody here knows how this fleet cables the drives' second FC port, and it
-  decides whether a critical `fc_ports` rule can exist.** Every TS4500 drive
-  carries two ports, so a single dark one is redundancy working and rightly a
-  warning. Both dark at once would be the critical signal — a drive-side or
-  drive-power fault that removes the drive from every host — but only if both
-  ports are actually cabled. The 2026-07-28 capture cannot settle it: 37 of 80
-  ports report `noLightDetected`, which is far too many to be faults and
-  strongly suggests the second port is simply unused on most drives, in which
-  case a both-dark rule would page on the normal case for ~half the fleet.
-  "Strongly suggests" is not knowing. **Ask whoever cabled the SAN**, then
-  either write the rule or record here that it cannot exist. Until then
-  `FCPortNoLight` is the only link-state rule and it is a warning.
+- `[RESOLVED 2026-08-06]` **How this fleet cables the drives' second FC port.**
+  It does not, and the question resolved against the rule it was protecting.
+  Measured across the whole fleet through the observability stack: **304 drives,
+  608 ports, 284 drives with exactly one port dark, and zero with both dark.**
+  All 259 `use=access` drives are single-attached, without exception. The
+  maintainer confirmed it is deliberate and static.
+  So `FCPortNoLight` — a warning on any dark port whose drive is online — was
+  describing nominal cabling: **284 permanent alerts against a healthy fleet**,
+  188 already firing and the rest pending. It is removed rather than tuned.
+  What replaces it is what this entry originally asked for: `DriveFCPortsAllDark`
+  (warning) fires when EVERY port of an online drive is dark, written as
+  `dark == total` so it does not assume two ports per drive; and
+  `DriveFCPortsAllDarkMultiple` (critical) fires when three or more drives on one
+  library are in that state, because drives do not fail in threes by coincidence
+  and what they share — a switch, an HBA, a fabric zone, a power feed — is the
+  thing to look at. Both are silent on the current fleet.
+  **The severity split came from the maintainer, not from the data**: losing a
+  single drive is routine here, so the isolated case is a warning and only the
+  correlated one pages. The `>= 3` count is a DEFAULT, flagged as such in
+  `alerts.yml`; it is absolute rather than proportional because these libraries
+  run 40 to 96 drives and a percentage would mean 4 on the smallest and 10 on
+  the largest. Revisit once there is history: how often drives drop, and in what
+  batch sizes, is precisely what the stack now records.
+  **The control-path drives are not a special case for these rules.** 45 of them
+  exist, 25 also run on a single link, and that is deliberate too — when one is
+  lost the role is reassigned to another drive by hand. What matters is how many
+  a logical library has left, which `ControlPathRedundancyLost` already covers at
+  `< 2` against a fleet whose smallest logical library runs 3. A second
+  control-path rule was drafted and dropped as a duplicate.
+  The transferable lesson is about the evidence, not the cabling: the 2026-07-28
+  capture showed 37 of 80 ports dark and "strongly suggested" this answer for a
+  week. One query against the running fleet settled it in a minute, and settled
+  it more precisely than the capture could have — the capture could not see that
+  the split is per-drive rather than per-port.
 - `[OPEN]` **R1.11.2 types `fcPorts.portNumber` as a string; the wire sends a number.**
   Every one of the capture's 80 entries carries a bare JSON `0` or `1` where the
   manual's attribute table says `(string)`. The field is deliberately not

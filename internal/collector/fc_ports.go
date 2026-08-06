@@ -85,7 +85,7 @@ type fcPortStats struct {
 	// series below rather than on _info alone, on the same terms
 	// logical_library already does on drives — it is a grouping key, not an
 	// identity string, it is constant per port so it costs no extra series,
-	// and putting it there is what lets FCPortNoLight be a plain join
+	// and putting it there is what lets DriveFCPortsAllDark be a plain join
 	// instead of a group_left against _info.
 	DriveLocation string `json:"driveLocation"`
 
@@ -258,7 +258,7 @@ func NewFCPortsCollector(log *logger.Logger, client *Client, interval time.Durat
 		interval: interval,
 		log:      log,
 		// drive_location rides on the stateset rather than living on _info
-		// alone, so FCPortNoLight can join this straight against
+		// alone, so DriveFCPortsAllDark can join this straight against
 		// tapelibrary_drive_state instead of pulling the drive through a
 		// group_left. Constant per port, so it costs no extra series.
 		state: prometheus.NewDesc(

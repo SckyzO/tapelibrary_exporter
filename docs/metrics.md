@@ -372,7 +372,7 @@ are emitted per port as their own series, exactly one carrying `1` and the rest
 **`drive_location` rides on the measurement series, not on `_info` alone.** It
 is a grouping key rather than an identity string and is constant per port, so it
 costs no extra series — the same argument `logical_library` already makes on
-drives. Putting it there is what lets `FCPortNoLight` join straight against
+drives. Putting it there is what lets `DriveFCPortsAllDark` join straight against
 `tapelibrary_drive_state`: a port going dark matters enormously if its drive is
 online and not at all if the drive is in service mode, and only the join can
 tell those apart.
