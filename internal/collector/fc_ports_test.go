@@ -95,7 +95,7 @@ func TestParseFCPorts(t *testing.T) {
 	}
 
 	// The join key to the drives collector. If it ever stops being decoded,
-	// FCPortNoLight silently matches nothing rather than failing loudly:
+	// DriveFCPortsAllDark silently matches nothing rather than failing loudly:
 	// its `on (job, library, location)` join would find no right-hand side.
 	t.Run("every port carries the drive location it belongs to", func(t *testing.T) {
 		for _, p := range ports {
@@ -493,7 +493,7 @@ func TestFCPortsCollector_ErrorHandling(t *testing.T) {
 // or replaced with nothing.
 //
 // A cleared cache here would drop tapelibrary_fc_port_state entirely, and an
-// absent series cannot satisfy FCPortNoLight's `== 1`, so a library that became
+// absent series cannot satisfy DriveFCPortsAllDark's `== 1`, so a library that became
 // unreachable would silently stop being watched for a port that had gone dark
 // rather than alerting.
 func TestFCPortsCollector_ErrorKeepsPreviousCache(t *testing.T) {

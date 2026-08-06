@@ -723,57 +723,121 @@ groups:
       # {{ $labels.drive_location }} the drive it is installed on, so both
       # paste straight into the GUI.
       #
-      # BOTH RULES ARE WARNINGS, for a different reason than the I/O station
-      # rules above. A dark FC port is not deferrable the way an uncollected
-      # export is — it removes a drive from a host's view — but every TS4500
-      # drive here carries two ports, so a single dark port is the redundancy
-      # doing its job. What would deserve a critical tier is BOTH ports of one
-      # drive going dark at once, and that rule is deliberately not written
-      # yet: see docs/exporter-journal.md, "Open questions / assumptions".
-      # Nobody here has established whether this fleet cables both ports of a
-      # drive to separate fabrics (in which case both dark means a drive-side
-      # or drive-power fault) or leaves the second port unused (in which case
-      # it is dark permanently and the rule would page on the normal case).
-      # The capture cannot settle it: 37 of its 80 ports are dark, which is far
-      # too many to be faults and strongly suggests the second reading, but
-      # "strongly suggests" is not the same as knowing the cabling.
+      # THE CABLING QUESTION IS SETTLED, and it settled against the rule that
+      # used to live here. Measured against the whole fleet on 2026-08-06:
+      # 304 drives, 608 ports, 284 drives with exactly one port dark, and ZERO
+      # with both dark. Every one of the 259 `use=access` drives has a single
+      # port cabled, without exception. This fleet leaves the second port
+      # unused, deliberately.
+      #
+      # So a single dark port is not a fault here, it is the normal state of
+      # 93% of the drives, and the rule that paged on it produced 284 permanent
+      # alerts against a healthy fleet — the kind of rule that teaches people
+      # to ignore alerts. It is replaced below.
+      #
+      # The 45 `use=controlPath` drives are cabled the same way and are not a
+      # special case for THESE rules: 25 of them also run on a single link, and
+      # that too is deliberate. Losing one is routine, and the operator's own
+      # procedure is to assign the controlPath role to another drive by hand.
+      # What matters there is how many control paths a logical library has
+      # left, which ControlPathRedundancyLost above already measures — at
+      # `< 2`, against a fleet whose smallest logical library runs 3. No second
+      # control-path rule is needed and none is added.
 
-      # The planned candidate, verbatim from docs/exporter-journal.md: "warning
-      # if a port whose drive is online sits at state=noLightDetected for 15m".
+      # ALL of a drive's ports dark, not one of them. That is the difference
+      # between a drive that has lost its only cabled link and a drive whose
+      # spare port was never plugged in, and it is the difference the previous
+      # rule could not make.
       #
-      # The join is the whole point of this rule and the reason drive_location
-      # rides on the stateset rather than on _info. A dark port on a drive that
-      # is in service mode, cleaning or being updated is expected — someone
-      # unplugged it, or the drive is down on purpose. A dark port on a drive
-      # the library reports as online is a cable, SFP, or fabric fault, and
-      # nothing on /v1/drives can see it: the drive keeps reporting perfectly
-      # healthy while its host loses the path to it.
+      # Written as "dark ports == total ports" rather than "== 2" so it does
+      # not depend on every drive carrying exactly two. The denominator counts
+      # the noLightDetected series themselves (one per port, regardless of
+      # value), which is the port inventory; the numerator counts the ones
+      # currently at 1.
       #
-      # label_replace rewrites this collector's drive_location into location so
-      # the two sides share a join key; it is applied to the FC side rather
-      # than the drives side so the resulting series keeps the port's own
-      # labels for the annotations below.
+      # The join against drive_state is what the previous rule got right and is
+      # kept: a dark port on a drive in service mode, cleaning or being updated
+      # is somebody unplugging it on purpose. Only an ONLINE drive going dark
+      # is a cable, SFP or fabric fault, and nothing on /v1/drives can see it —
+      # the drive keeps reporting perfectly healthy while its host loses the
+      # path to it. label_replace rewrites drive_location into location so both
+      # sides share a join key.
       #
-      # 15m is the planned window and a re-derived DEFAULT, not a measured
-      # threshold: the legacy RoS scripts in samples/legacy/ never collected
-      # this endpoint. It is shorter than the 30m/1h used elsewhere because a
-      # link either negotiates or it does not — there is no routine operation
-      # that leaves a port on an online drive dark for a quarter of an hour.
-      - alert: FCPortNoLight
+      # 15m is unchanged from the rule this replaces, and is still a re-derived
+      # DEFAULT rather than a measured one: a link either negotiates or it does
+      # not, and no routine operation leaves an online drive's only link dark
+      # for a quarter of an hour.
+      - alert: DriveFCPortsAllDark
         expr: |
-          label_replace(
-            tapelibrary_fc_port_state{state="noLightDetected"} == 1,
-            "location", "$1", "drive_location", "(.*)"
+          count by (job, library, location) (
+            label_replace(
+              tapelibrary_fc_port_state{state="noLightDetected"} == 1,
+              "location", "$1", "drive_location", "(.*)"
+            )
+            and on (job, library, location)
+            (tapelibrary_drive_state{state="online"} == 1)
           )
-          and on (job, library, location)
-          (tapelibrary_drive_state{state="online"} == 1)
+          ==
+          count by (job, library, location) (
+            label_replace(
+              tapelibrary_fc_port_state{state="noLightDetected"},
+              "location", "$1", "drive_location", "(.*)"
+            )
+            and on (job, library, location)
+            (tapelibrary_drive_state{state="online"} == 1)
+          )
         for: 15m
         labels:
           severity: warning
           component: exporter
         annotations:
-          summary: 'tapelibrary_exporter Fibre Channel port on drive {{ $labels.location }} of library {{ $labels.library }} detects no light'
-          description: 'A Fibre Channel port on drive {{ $labels.location }} of {{ $labels.library }} has detected no light for 15 minutes while the drive itself reports online. No device is connected on that link: check the cable, the SFP at both ends, and the SAN switch port. The drive will keep reporting healthy on /v1/drives throughout, and any host reaching it only through this path has already lost it. If the drive is deliberately single-attached, this port is dark permanently and the rule should be silenced for it rather than left firing.'
+          summary: 'tapelibrary_exporter drive {{ $labels.location }} on {{ $labels.library }} has lost every Fibre Channel link'
+          description: 'Every Fibre Channel port on drive {{ $labels.location }} of {{ $labels.library }} has detected no light for 15 minutes while the drive itself reports online. The drive is invisible to its hosts and will keep reporting healthy on /v1/drives throughout. Check the cable, the SFP at both ends, and the SAN switch port. This is a warning rather than a critical because losing one drive is routine on this fleet; several at once on the same library is what DriveFCPortsAllDarkMultiple covers.'
+
+      # Several drives losing every link at once on ONE library is a different
+      # failure from several drives failing independently: drives do not fail in
+      # threes on the same afternoon, so a cause they share does — a switch, a
+      # card, a fabric, someone working in the rack.
+      #
+      # >= 3 is a DEFAULT and is flagged as one. The operator states that losing
+      # a single drive is routine, which rules out 1 and makes 2 uncomfortably
+      # close to routine; 3 is the first count that cannot be shrugged off. It
+      # is deliberately absolute rather than a share of the library, because the
+      # libraries here run 40 to 96 drives and a percentage would mean 4 drives
+      # on the smallest and 10 on the largest — far too slack on the big ones.
+      # Three is 7.5% of the smallest and 3.1% of the largest, and abnormal on
+      # both. REVISIT once this fleet has a few weeks of history: how often
+      # drives actually drop, and in what sizes of batch, is exactly what the
+      # observability stack now records and what nobody could answer when this
+      # was written.
+      - alert: DriveFCPortsAllDarkMultiple
+        expr: |
+          count by (job, library) (
+            count by (job, library, location) (
+              label_replace(
+                tapelibrary_fc_port_state{state="noLightDetected"} == 1,
+                "location", "$1", "drive_location", "(.*)"
+              )
+              and on (job, library, location)
+              (tapelibrary_drive_state{state="online"} == 1)
+            )
+            ==
+            count by (job, library, location) (
+              label_replace(
+                tapelibrary_fc_port_state{state="noLightDetected"},
+                "location", "$1", "drive_location", "(.*)"
+              )
+              and on (job, library, location)
+              (tapelibrary_drive_state{state="online"} == 1)
+            )
+          ) >= 3
+        for: 15m
+        labels:
+          severity: critical
+          component: exporter
+        annotations:
+          summary: 'tapelibrary_exporter {{ $value }} online drives on {{ $labels.library }} have lost every Fibre Channel link'
+          description: '{{ $value }} drives on {{ $labels.library }} have had every Fibre Channel port dark for 15 minutes while each reports online. Drives do not fail together by coincidence: look for what they share rather than at the drives — a SAN switch, an HBA or fabric zone, a power feed to one rack section, or work in progress in the rack. Hosts have already lost these drives.'
 
       # The second planned candidate: "warning if negotiated speed drops below
       # the port's configured setting". That expression is UNDEFINED on this
